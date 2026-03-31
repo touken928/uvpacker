@@ -1,8 +1,7 @@
 ## uvpacker
 
-`uvpacker` is a Windows-oriented CLI packer for Python projects.  
-Instead of producing a single-file executable, it builds a self-contained directory that can be copied, zipped, and distributed as-is.  
-The directory contains:
+`uvpacker` is a Windows-oriented CLI packer for Python projects that you can run on Linux, macOS, or Windows hosts, while always producing Windows (`win_amd64`) application directories.  
+Instead of producing a single-file executable, it builds a self-contained directory that can be copied, zipped, and distributed as-is. The directory contains:
 
 - the official CPython Embedded Runtime for Windows
 - all project dependencies installed for the `win_amd64` target
@@ -64,6 +63,9 @@ You can also pin the `uvpacker` version:
 ```bash
 uvx uvpacker==0.1.0 path/to/project
 ```
+
+> **Note:** The current implementation has been tested with `uv` **0.11.x**.  
+> Future `uv` releases may introduce breaking changes to the CLI or build behavior that could cause `uvpacker` to stop working until it is updated.
 
 ### Packing pipeline
 
