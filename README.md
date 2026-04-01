@@ -80,7 +80,11 @@ The current build pipeline in `uvpacker` is:
 4. Build a wheel for the target project
 5. Use `uv pip install` with the `win_amd64` target platform to install the wheel and its dependencies into `packages/`
 6. Patch the embedded runtime’s `_pth` file to include `..\packages`
-7. Generate `.exe` launchers in the root of the output directory
+7. For the target project’s own package, compile `.py` sources to `.pyc` using
+   the target Python version via `uv run`, then remove the original `.py`
+   files (lightweight obfuscation; reverse engineering is still possible but
+   source code is no longer shipped in plain text)
+8. Generate `.exe` launchers in the root of the output directory
 
 ### Cross-platform builds
 
