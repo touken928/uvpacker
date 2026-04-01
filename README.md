@@ -9,6 +9,8 @@ Instead of producing a single-file executable, it builds a self-contained direct
 
 The goal is to make a fully declared Python project runnable on machines without a system Python installation, while keeping the build process simple and predictable.
 
+Repository: [`touken928/uvpacker`](https://github.com/touken928/uvpacker)
+
 ### Requirements for target projects
 
 The target project must provide at least:
@@ -33,12 +35,13 @@ By default, `uvpacker` writes to `dist/<project-name>`, with a structure similar
 dist/<project-name>/
   runtime/
   packages/
-  <script>.cmd
+  <script>.exe
 ```
 
 - `runtime/`: the official 64‑bit Windows Embedded Runtime
 - `packages/`: the built wheel of your project and all dependencies
-- `<script>.cmd`: launchers generated from `[project.scripts]`
+- `<script>.exe`: launchers generated from `[project.scripts]` using a small
+  embedded `launcher.exe` template
 
 The launchers invoke `runtime\python.exe` and adjust the embedded runtime’s `_pth` file to include `..\packages`, so the packed app does not depend on any system Python.
 
@@ -77,7 +80,7 @@ The current build pipeline in `uvpacker` is:
 4. Build a wheel for the target project
 5. Use `uv pip install` with the `win_amd64` target platform to install the wheel and its dependencies into `packages/`
 6. Patch the embedded runtime’s `_pth` file to include `..\packages`
-7. Generate `.cmd` launchers in the root of the output directory
+7. Generate `.exe` launchers in the root of the output directory
 
 ### Cross-platform builds
 
@@ -103,7 +106,7 @@ The web demo uses `importlib.resources` to load HTML/CSS/JS from the package to 
 
 The Qt demo verifies that:
 
-- a GUI application can be packed and launched via a `.cmd` script
+- a GUI application can be packed and launched via a `.exe` launcher
 - GUI-related dependencies are correctly installed for `win_amd64`
 
 ### Current status and future work
@@ -118,7 +121,6 @@ The current implementation covers:
 
 Planned and potential improvements include:
 
-- generating real `.exe` launchers instead of `.cmd` files
 - cleaning up helper entry points in `packages/bin` that should not be exposed
 - stricter wheel compatibility checks and caching strategies
 - more detailed error messages and build diagnostics
