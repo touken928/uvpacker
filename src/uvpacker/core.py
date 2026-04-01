@@ -4,6 +4,7 @@ import dataclasses
 import pathlib
 import re
 import shutil
+import subprocess
 import sys
 from typing import Any, Mapping
 
@@ -160,18 +161,29 @@ def _perform_pack(
     embedded_dir.mkdir()
     app_dir.mkdir()
 
-    info("Step 1/3: Downloading embedded runtime...")
+    info("Step 1/4: Downloading embedded runtime...")
     runtime.download_and_extract_embedded_runtime(python_version, embedded_dir)
     _patch_embedded_runtime_config(embedded_dir)
 
-    info("Step 2/3: Installing project and dependencies...")
+    info("Step 2/4: Installing project and dependencies into packages/...")
     uvclient.install_project_with_uv(
         project_dir=project_dir,
         target_dir=app_dir,
         target_python_version=python_version,
     )
 
-    info("Step 3/3: Generating launchers...")
+    info("Step 3/4: Stripping source .py files for the target project (bytecode-only payload)...")
+    # Use the same Python minor version as the embedded runtime when compiling
+    # bytecode via `uv run`, so that .pyc files match the target environment.
+    py_parts = python_version.split(".")
+    target_minor = ".".join(py_parts[:2]) if len(py_parts) >= 2 else python_version
+    _strip_source_to_pyc(
+        app_dir=app_dir,
+        project_name=cfg.name,
+        target_python_minor=target_minor,
+    )
+
+    info("Step 4/4: Generating launchers...")
     _create_exe_launchers(
         scripts=cfg.scripts,
         launchers_dir=output_dir,
@@ -201,6 +213,79 @@ def _patch_embedded_runtime_config(embedded_dir: pathlib.Path) -> None:
     if rel_app not in content:
         content = content.rstrip() + "\n" + rel_app + "\n"
         pth.write_text(content, encoding="utf-8")
+
+
+def _strip_source_to_pyc(
+    app_dir: pathlib.Path,
+    project_name: str,
+    target_python_minor: str,
+) -> None:
+    """
+    Compile the target project's sources to .pyc using the target Python version
+    via ``uv run``, then remove the corresponding .py files.
+
+    This is a best-effort obfuscation step: it avoids shipping readable source
+    files for the target project, but does not make reverse engineering
+    impossible.
+    """
+    # Heuristic: prefer the normalized distribution name (hyphens -> underscores).
+    dist_name = project_name
+    candidates = {dist_name, dist_name.replace("-", "_")}
+
+    target_dirs: list[pathlib.Path] = []
+    for entry in app_dir.iterdir():
+        if entry.is_dir() and entry.name in candidates:
+            target_dirs.append(entry)
+
+    # Fallback: if we cannot identify a specific package directory, operate on
+    # the entire app_dir.
+    if not target_dirs:
+        target_dirs = [app_dir]
+
+    for pkg_dir in target_dirs:
+        info(
+            f"Compiling .py files in {pkg_dir.name!r} to .pyc using "
+            f"Python {target_python_minor} via `uv run`...",
+        )
+        cmd = [
+            "uv",
+            "run",
+            "--python",
+            target_python_minor,
+            "python",
+            "-m",
+            "compileall",
+            "-b",
+            str(pkg_dir),
+        ]
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(pkg_dir),
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except OSError as exc:
+            raise UvPackError(
+                f"Failed to invoke 'uv' to compile bytecode for {pkg_dir.name!r}: {exc}",
+            ) from exc
+
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip()
+            raise UvPackError(
+                f"'uv run --python {target_python_minor} python -m compileall' "
+                f"failed for {pkg_dir.name!r}: {detail}",
+            )
+
+        # Remove .py sources now that .pyc files exist.
+        for py_file in pkg_dir.rglob("*.py"):
+            try:
+                py_file.unlink()
+            except OSError:
+                # Best-effort: if we cannot delete a file, continue.
+                continue
 
 
 def _create_cmd_launchers(
