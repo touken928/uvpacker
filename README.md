@@ -61,7 +61,7 @@ uvx uvpacker path/to/project -o path/to/output
 You can also pin the `uvpacker` version:
 
 ```bash
-uvx uvpacker==0.1.0 path/to/project
+uvx uvpacker==0.2.0 path/to/project
 ```
 
 > **Note:** The current implementation has been tested with `uv` **0.11.x**.  

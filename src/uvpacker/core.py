@@ -5,7 +5,6 @@ import pathlib
 import re
 import shutil
 import sys
-import textwrap
 from typing import Any, Mapping
 
 try:  # Python 3.11+
@@ -13,6 +12,7 @@ try:  # Python 3.11+
 except ModuleNotFoundError:  # pragma: no cover
     tomllib = None  # type: ignore[assignment]
 
+from . import launcher as exe_launcher
 from . import runtime, uvclient
 from .errors import UvPackError
 from .ui import info
@@ -151,14 +151,6 @@ def _perform_pack(
     output_dir: pathlib.Path,
     python_version: str,
 ) -> None:
-    # For the initial implementation we keep this intentionally simple and
-    # leave room for refinement. The layout we aim for:
-    #
-    # <output_dir>/
-    #   runtime/          # extracted embedded runtime
-    #   packages/         # project code + dependencies
-    #   <script>.cmd      # launchers for each [project.scripts] entry
-    #
     if output_dir.exists():
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -180,10 +172,8 @@ def _perform_pack(
     )
 
     info("Step 3/3: Generating launchers...")
-    _create_cmd_launchers(
+    _create_exe_launchers(
         scripts=cfg.scripts,
-        embedded_dir=embedded_dir,
-        app_dir=app_dir,
         launchers_dir=output_dir,
     )
     info("Done.")
@@ -246,4 +236,34 @@ def _create_cmd_launchers(
             """,
         )
         launcher_path.write_text(cmd_content, encoding="utf-8")
+
+
+def _create_exe_launchers(
+    scripts: list[ScriptDefinition],
+    launchers_dir: pathlib.Path,
+) -> None:
+    """
+    Generate Windows `.exe` launchers backed by a small C shim.
+
+    These launchers are optional: if no template is available (for example when
+    running on a non-Windows host without mingw), this step is silently skipped
+    and `.cmd` launchers are still generated.
+    """
+    template = exe_launcher.ensure_template_exe()
+    if template is None:
+        info("Executable launchers not created: no launcher.exe template available.")
+        return
+
+    for script in scripts:
+        module, _, func = script.target.partition(":")
+        if not module:
+            continue
+        created = exe_launcher.build_launcher_for_script(
+            launchers_dir=launchers_dir,
+            script_name=script.name,
+            module=module,
+            func=func or "main",
+        )
+        if created is None:
+            info(f"Failed to create executable launcher for script {script.name!r}.")
 

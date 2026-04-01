@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 
-PACKAGE_NAME = "uvpack_web_demo"
+PACKAGE_NAME = "web_demo"
 
 app = FastAPI(title="uvpack web demo")
 
@@ -53,11 +53,6 @@ def main() -> int:
     """Entry point used by [project.scripts]."""
     import uvicorn
 
-    uvicorn.run(
-        "uvpack_web_demo.main:app",
-        host="127.0.0.1",
-        port=8000,
-        reload=False,
-    )
+    uvicorn.run("web_demo.main:app", host="127.0.0.1", port=8000, reload=False)
     return 0
 
