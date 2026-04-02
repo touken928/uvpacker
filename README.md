@@ -64,7 +64,12 @@ uvx uvpacker path/to/project -o path/to/output
 
 # Pin version
 uvx uvpacker==0.3.1 path/to/project
+
+# Mainland China (example): Tsinghua PyPI for uvx + --tsinghua for embed / uv inside uvpacker
+UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple uvx uvpacker==0.3.1 path/to/project --tsinghua
 ```
+
+`UV_DEFAULT_INDEX` makes `uvx` install uvpacker from Tsinghua PyPI; `--tsinghua` applies Tsinghua sources during packing (embed + `uv`).
 
 > **Note:** Tested with **`uv` 0.11.x**. Newer `uv` releases may change CLI behavior; report or pin versions if something breaks.
 

@@ -8,6 +8,7 @@ import urllib.request
 import zipfile
 
 from .errors import UvPackError
+from .sources import DEFAULT_DOWNLOAD_CONFIG, PackDownloadConfig
 from .ui import info
 
 
@@ -39,18 +40,22 @@ def require_exact_minor_from_requires(requires_python: str | None) -> str:
     return m.group(1)
 
 
-def resolve_latest_embed_for_minor(minor: str) -> str:
+def resolve_latest_embed_for_minor(
+    minor: str,
+    *,
+    download: PackDownloadConfig = DEFAULT_DOWNLOAD_CONFIG,
+) -> str:
     """
     Resolve the latest CPython patch version that provides a Windows 64-bit
     embedded runtime for a given X.Y minor.
     """
-    index_url = "https://www.python.org/ftp/python/"
+    index_url = download.embed_listing_url()
     try:
         with urllib.request.urlopen(index_url) as resp:
             html = resp.read().decode("utf-8", errors="replace")
     except Exception as exc:  # noqa: BLE001
         raise UvPackError(
-            f"Failed to query python.org for available versions: {exc}",
+            f"Failed to query embed index for available versions ({index_url!r}): {exc}",
         ) from exc
 
     candidates: list[tuple[int, int, int]] = []
@@ -65,7 +70,7 @@ def resolve_latest_embed_for_minor(minor: str) -> str:
 
     if not candidates:
         raise UvPackError(
-            f"No patch releases found on python.org for minor version {minor!r}.",
+            f"No patch releases found at embed index {index_url!r} for minor {minor!r}.",
         )
 
     for major, minor_part, patch in sorted(
@@ -74,10 +79,7 @@ def resolve_latest_embed_for_minor(minor: str) -> str:
         reverse=True,
     ):
         version = f"{major}.{minor_part}.{patch}"
-        url = (
-            f"https://www.python.org/ftp/python/"
-            f"{version}/python-{version}-embed-amd64.zip"
-        )
+        url = download.embed_zip_url(version)
         try:
             req = urllib.request.Request(url, method="HEAD")
             with urllib.request.urlopen(req):  # noqa: S310
@@ -87,13 +89,15 @@ def resolve_latest_embed_for_minor(minor: str) -> str:
 
     raise UvPackError(
         f"Could not find a Windows 64-bit embedded runtime for minor {minor!r} "
-        "on python.org.",
+        f"(checked under {index_url!r}).",
     )
 
 
 def download_and_extract_embedded_runtime(
     python_version: str,
     dest_dir: pathlib.Path,
+    *,
+    download: PackDownloadConfig = DEFAULT_DOWNLOAD_CONFIG,
 ) -> None:
     """
     Download and unpack the official CPython embedded runtime for Windows.
@@ -101,10 +105,7 @@ def download_and_extract_embedded_runtime(
     The ``embed-amd64`` zip is stored under ``~/.cache/uvpacker/embed`` (or
     ``$XDG_CACHE_HOME/uvpacker/embed``) so repeated packs skip re-downloading.
     """
-    url = (
-        f"https://www.python.org/ftp/python/"
-        f"{python_version}/python-{python_version}-embed-amd64.zip"
-    )
+    url = download.embed_zip_url(python_version)
     cache_name = f"python-{python_version}-embed-amd64.zip"
     cache_dir = _embed_cache_dir()
     cache_zip = cache_dir / cache_name
@@ -122,7 +123,9 @@ def download_and_extract_embedded_runtime(
             pass
 
     part_path = cache_dir / (cache_name + ".part")
-    info(f"Downloading embedded runtime {python_version} to {cache_dir} ...")
+    info(
+        f"Downloading embedded runtime {python_version} from {url!r} into {cache_dir} ...",
+    )
     try:
         try:
             with urllib.request.urlopen(url) as resp, part_path.open("wb") as f:
@@ -140,4 +143,3 @@ def download_and_extract_embedded_runtime(
                 pass
 
     shutil.unpack_archive(str(cache_zip), str(dest_dir))
-

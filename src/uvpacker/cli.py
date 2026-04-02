@@ -5,6 +5,7 @@ import pathlib
 import sys
 
 from .core import pack_project
+from .sources import PACK_DOWNLOAD_PRESETS
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -29,6 +30,14 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Output directory for the packed application (defaults to ./dist/<project-name>).",
     )
+    parser.add_argument(
+        "--tsinghua",
+        action="store_true",
+        help=(
+            "Use Tsinghua mirrors for the embed zip index and for uv's default PyPI index "
+            "(build + pip install)."
+        ),
+    )
 
     return parser
 
@@ -37,6 +46,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    if args.tsinghua:
+        if "tsinghua" not in PACK_DOWNLOAD_PRESETS:
+            parser.error("This build does not include Tsinghua download sources.")
+        download = PACK_DOWNLOAD_PRESETS["tsinghua"]
+    else:
+        download = None
+
     project_dir = pathlib.Path(args.project_dir).resolve()
     output = pathlib.Path(args.output).resolve() if args.output else None
 
@@ -44,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
         pack_project(
             project_dir=project_dir,
             output_dir=output,
+            download=download,
         )
     except KeyboardInterrupt:
         return 130
@@ -55,4 +72,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main(sys.argv[1:]))
-

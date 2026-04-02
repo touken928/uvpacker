@@ -6,15 +6,24 @@ import sys
 import tempfile
 
 from .errors import UvPackError
+from .sources import DEFAULT_DOWNLOAD_CONFIG, PackDownloadConfig
 
 
 WINDOWS_AMD64_UV_PLATFORM = "x86_64-pc-windows-msvc"
+
+
+def _uv_default_index_args(download: PackDownloadConfig) -> list[str]:
+    if download.pypi_default_index is None:
+        return []
+    return ["--default-index", download.pypi_default_index]
 
 
 def install_project_with_uv(
     project_dir: pathlib.Path,
     target_dir: pathlib.Path,
     target_python_version: str,
+    *,
+    download: PackDownloadConfig = DEFAULT_DOWNLOAD_CONFIG,
 ) -> None:
     """
     Install a project into ``target_dir`` as a Windows amd64 application payload.
@@ -27,13 +36,14 @@ def install_project_with_uv(
     """
     with tempfile.TemporaryDirectory() as tmp:
         wheel_dir = pathlib.Path(tmp)
-        wheel_path = _build_project_wheel(project_dir, wheel_dir)
+        wheel_path = _build_project_wheel(project_dir, wheel_dir, download=download)
         _validate_built_wheel(wheel_path)
 
         cmd = [
             "uv",
             "pip",
             "install",
+            *_uv_default_index_args(download),
             "--python",
             sys.executable,
             "--target",
@@ -55,10 +65,16 @@ def install_project_with_uv(
             raise UvPackError(f"Dependency install failed. {exc}") from exc
 
 
-def _build_project_wheel(project_dir: pathlib.Path, wheel_dir: pathlib.Path) -> pathlib.Path:
+def _build_project_wheel(
+    project_dir: pathlib.Path,
+    wheel_dir: pathlib.Path,
+    *,
+    download: PackDownloadConfig = DEFAULT_DOWNLOAD_CONFIG,
+) -> pathlib.Path:
     cmd = [
         "uv",
         "build",
+        *_uv_default_index_args(download),
         "--wheel",
         "--out-dir",
         str(wheel_dir),
@@ -137,4 +153,3 @@ def _tail(text: str, max_lines: int = 6) -> str:
     if not lines:
         return "No output."
     return " | ".join(lines[-max_lines:])
-

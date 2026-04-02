@@ -16,6 +16,7 @@ except ModuleNotFoundError:  # pragma: no cover
 from . import launcher as exe_launcher
 from . import runtime, uvclient
 from .errors import UvPackError
+from .sources import DEFAULT_DOWNLOAD_CONFIG, PackDownloadConfig
 from .ui import info
 
 
@@ -39,6 +40,8 @@ class ProjectConfig:
 def pack_project(
     project_dir: pathlib.Path,
     output_dir: pathlib.Path | None = None,
+    *,
+    download: PackDownloadConfig | None = None,
 ) -> None:
     """
     High-level entrypoint for packing a Python project.
@@ -50,6 +53,9 @@ def pack_project(
     - Resolves the target Python version
     - Obtains the embedded runtime (cached under ~/.cache/uvpacker/embed), installs deps via uv, and prepares a
       relocatable application directory.
+
+    Pass ``download`` (CLI: ``--tsinghua``) to use a non-default embed index / ``uv`` PyPI index;
+    see ``uvpacker.sources.PackDownloadConfig`` and ``PACK_DOWNLOAD_PRESETS``.
     """
     project_dir = project_dir.resolve()
     if not project_dir.is_dir():
@@ -63,9 +69,16 @@ def pack_project(
     _validate_project_config(cfg)
     info(f"Project: {cfg.name}")
 
+    dl = download if download is not None else DEFAULT_DOWNLOAD_CONFIG
+    if dl != DEFAULT_DOWNLOAD_CONFIG:
+        parts = [f"embed index {dl.embed_listing_url()!r}"]
+        if dl.pypi_default_index is not None:
+            parts.append(f"uv default index {dl.pypi_default_index!r}")
+        info("Non-default download sources: " + "; ".join(parts) + ".")
+
     info("Resolving target Python runtime...")
     minor = runtime.require_exact_minor_from_requires(cfg.requires_python)
-    target_python = runtime.resolve_latest_embed_for_minor(minor)
+    target_python = runtime.resolve_latest_embed_for_minor(minor, download=dl)
     info(f"Using Python {target_python} (win_amd64 embedded)")
 
     resolved_output = _resolve_output_dir(cfg, project_dir, output_dir)
@@ -76,6 +89,7 @@ def pack_project(
         project_dir=project_dir,
         output_dir=resolved_output,
         python_version=target_python,
+        download=dl,
     )
 
 
@@ -165,6 +179,8 @@ def _perform_pack(
     project_dir: pathlib.Path,
     output_dir: pathlib.Path,
     python_version: str,
+    *,
+    download: PackDownloadConfig,
 ) -> None:
     if output_dir.exists():
         shutil.rmtree(output_dir)
@@ -176,7 +192,11 @@ def _perform_pack(
     app_dir.mkdir()
 
     info("Step 1/4: Preparing embedded runtime...")
-    runtime.download_and_extract_embedded_runtime(python_version, embedded_dir)
+    runtime.download_and_extract_embedded_runtime(
+        python_version,
+        embedded_dir,
+        download=download,
+    )
     _patch_embedded_runtime_config(embedded_dir)
 
     info("Step 2/4: Installing project and dependencies into packages/...")
@@ -184,6 +204,7 @@ def _perform_pack(
         project_dir=project_dir,
         target_dir=app_dir,
         target_python_version=python_version,
+        download=download,
     )
 
     info("Step 3/4: Stripping source .py files for the target project (bytecode-only payload)...")
