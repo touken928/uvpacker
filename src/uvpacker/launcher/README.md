@@ -18,31 +18,31 @@ packed applications via small `console.exe` / `gui.exe` template shims instead o
   - **`console.exe`** — console subsystem (for `[project.scripts]`).
   - **`gui.exe`** — Windows subsystem, no console window (for
     `[project.gui-scripts]`).
-- The Python package (`uvpacker.launcher`) locates or cross-compiles these
-  templates and appends per-script JSON + footer to produce `<script>.exe` in
-  the packed output directory.
+- The Python package (`uvpacker.launcher`) locates the bundled templates and
+  appends per-script JSON + footer to produce `<script>.exe` in the packed
+  output directory.
 
-### Building on Windows (MSVC or mingw-w64)
+### Building with mingw-w64 (Windows or cross-compile)
 
-From `src/uvpacker/launcher`:
-
-**Console template**
+From `src/uvpacker/launcher`, reuse one flag set for both targets:
 
 ```bash
-x86_64-w64-mingw32-gcc -municode -O2 -static -s -o console.exe launcher.c
+CC=x86_64-w64-mingw32-gcc
+FLAGS="-municode -O2 -static -s"
+$CC $FLAGS -o console.exe launcher.c
+$CC $FLAGS -mwindows -DUVPK_GUI -o gui.exe launcher.c
 ```
 
-**GUI template (no console window)**
+**What you should not drop**
 
-```bash
-x86_64-w64-mingw32-gcc -municode -O2 -static -s -mwindows -DUVPACKER_GUI_SUBSYSTEM -o gui.exe launcher.c
-```
+- `-municode` — wide entry (`wmain` / `wWinMain`).
+- `-mwindows` and `-DUVPK_GUI` together for `gui.exe` only — selects Windows subsystem and the `wWinMain` path in `launcher.c`.
+- `-static` — avoids shipping MinGW runtime DLLs next to the template (recommended for checked-in `console.exe` / `gui.exe`).
 
-Notes:
+**What you can omit if you want a shorter command**
 
-- `-municode` selects the wide-character entry (`wmain` / `wWinMain`).
-- `-mwindows` + `-DUVPACKER_GUI_SUBSYSTEM` builds the GUI subsystem binary.
-- `-static -s` keeps the templates small and mostly self-contained.
+- `-O2` — default is `-O0` (faster compile; exe may be larger). Use `-Os` if you care about size instead of speed.
+- `-s` — keep for release; drop if you need symbols in a debugger.
 
 ### Building on macOS (cross-compiling for Windows)
 
@@ -50,7 +50,7 @@ Notes:
 brew install mingw-w64
 cd src/uvpacker/launcher
 x86_64-w64-mingw32-gcc -municode -O2 -static -s -o console.exe launcher.c
-x86_64-w64-mingw32-gcc -municode -O2 -static -s -mwindows -DUVPACKER_GUI_SUBSYSTEM -o gui.exe launcher.c
+x86_64-w64-mingw32-gcc -municode -O2 -static -s -mwindows -DUVPK_GUI -o gui.exe launcher.c
 ```
 
 Check in both `console.exe` and `gui.exe` so they ship inside

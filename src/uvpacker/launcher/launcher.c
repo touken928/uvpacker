@@ -1,10 +1,3 @@
-#ifndef UNICODE
-#define UNICODE
-#endif
-#ifndef _UNICODE
-#define _UNICODE
-#endif
-
 #include <windows.h>
 
 #include <stdint.h>
@@ -225,7 +218,7 @@ static int run_launcher(void) {
     return ret;
 }
 
-#ifdef UVPACKER_GUI_SUBSYSTEM
+#ifdef UVPK_GUI
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLine, int nCmdShow) {
     (void)hInstance;
     (void)hPrevInstance;

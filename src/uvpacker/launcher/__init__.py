@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import struct
-import subprocess
-import tempfile
 from importlib import resources
 from pathlib import Path
 from typing import Any, Mapping
@@ -27,84 +25,9 @@ def get_template_exe(gui: bool) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def _compile_one_template(
-    *,
-    src_dir: Path,
-    out_name: str,
-    extra_cc_args: list[str],
-) -> Path | None:
-    source = src_dir / "launcher.c"
-    if not source.is_file():
-        return None
-
-    cc = "x86_64-w64-mingw32-gcc"
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / out_name
-        cmd = [
-            cc,
-            "-municode",
-            "-O2",
-            "-static",
-            "-s",
-            *extra_cc_args,
-            "-o",
-            str(out),
-            str(source),
-        ]
-        try:
-            proc = subprocess.run(
-                cmd,
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-        except OSError:
-            return None
-
-        if proc.returncode != 0 or not out.is_file():
-            return None
-
-        target = src_dir / out_name
-        target.write_bytes(out.read_bytes())
-        return target
-
-
-def _compile_template_exes_with_mingw() -> tuple[Path | None, Path | None]:
-    """
-    Compile launcher.c twice: console and GUI (Windows subsystem) templates.
-
-    Failures are treated as missing templates by callers.
-    """
-    src_dir = _get_package_dir()
-    console = _compile_one_template(
-        src_dir=src_dir,
-        out_name=TEMPLATE_CONSOLE,
-        extra_cc_args=[],
-    )
-    gui = _compile_one_template(
-        src_dir=src_dir,
-        out_name=TEMPLATE_GUI,
-        extra_cc_args=["-mwindows", "-DUVPACKER_GUI_SUBSYSTEM"],
-    )
-    return console, gui
-
-
 def ensure_template_exe(gui: bool) -> Path | None:
-    """
-    Ensure a launcher template exists for the requested subsystem and return its path.
-
-    Preference order:
-    1. Bundled template in the package (``console.exe`` / ``gui.exe``).
-    2. Best-effort compilation via mingw (development / CI), which builds both templates.
-    """
-    exe = get_template_exe(gui=gui)
-    if exe is not None:
-        return exe
-    console_built, gui_built = _compile_template_exes_with_mingw()
-    if gui:
-        return gui_built
-    return console_built or get_template_exe(gui=False)
+    """Return path to bundled ``console.exe`` or ``gui.exe``, or None if missing."""
+    return get_template_exe(gui=gui)
 
 
 def _make_payload(config: Mapping[str, Any]) -> bytes:

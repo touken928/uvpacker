@@ -346,9 +346,9 @@ def _create_exe_launchers(
     Console entries use a PE console template; ``[project.gui-scripts]`` entries
     use a Windows/GUI subsystem template (no console window).
 
-    These launchers are optional: if no template is available (for example when
-    running on a non-Windows host without mingw), the corresponding launchers
-    are skipped.
+    These launchers are optional: if the bundled ``console.exe`` / ``gui.exe``
+    templates are missing from the package, the corresponding launchers are
+    skipped.
     """
     for script in scripts:
         module, _, func = script.target.partition(":")
