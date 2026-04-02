@@ -63,7 +63,7 @@ uvx uvpacker path/to/project
 uvx uvpacker path/to/project -o path/to/output
 
 # Pin version
-uvx uvpacker==0.2.1 path/to/project
+uvx uvpacker==0.3.0 path/to/project
 ```
 
 > **Note:** Tested with **`uv` 0.11.x**. Newer `uv` releases may change CLI behavior; report or pin versions if something breaks.
