@@ -1,11 +1,26 @@
 from __future__ import annotations
 
+import os
 import pathlib
 import re
-import tempfile
+import shutil
 import urllib.request
+import zipfile
 
 from .errors import UvPackError
+from .ui import info
+
+
+def _embed_cache_dir() -> pathlib.Path:
+    """
+    Default: ``~/.cache/uvpacker/embed``; respect ``XDG_CACHE_HOME`` when set.
+    """
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    if xdg:
+        base = pathlib.Path(xdg)
+    else:
+        base = pathlib.Path.home() / ".cache"
+    return base / "uvpacker" / "embed"
 
 
 def require_exact_minor_from_requires(requires_python: str | None) -> str:
@@ -82,28 +97,47 @@ def download_and_extract_embedded_runtime(
 ) -> None:
     """
     Download and unpack the official CPython embedded runtime for Windows.
+
+    The ``embed-amd64`` zip is stored under ``~/.cache/uvpacker/embed`` (or
+    ``$XDG_CACHE_HOME/uvpacker/embed``) so repeated packs skip re-downloading.
     """
-    major_minor_patch = python_version
     url = (
         f"https://www.python.org/ftp/python/"
-        f"{major_minor_patch}/python-{major_minor_patch}-embed-amd64.zip"
+        f"{python_version}/python-{python_version}-embed-amd64.zip"
     )
+    cache_name = f"python-{python_version}-embed-amd64.zip"
+    cache_dir = _embed_cache_dir()
+    cache_zip = cache_dir / cache_name
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = pathlib.Path(tmp)
-        zip_path = tmp_path / "python-embed.zip"
+    if cache_zip.is_file() and cache_zip.stat().st_size > 0 and zipfile.is_zipfile(cache_zip):
+        info(f"Embedded runtime {python_version} from cache ({cache_dir}).")
+        shutil.unpack_archive(str(cache_zip), str(dest_dir))
+        return
 
+    if cache_zip.is_file():
         try:
-            with urllib.request.urlopen(url) as resp, zip_path.open("wb") as f:
-                import shutil
+            cache_zip.unlink()
+        except OSError:
+            pass
 
+    part_path = cache_dir / (cache_name + ".part")
+    info(f"Downloading embedded runtime {python_version} to {cache_dir} ...")
+    try:
+        try:
+            with urllib.request.urlopen(url) as resp, part_path.open("wb") as f:
                 shutil.copyfileobj(resp, f)
         except Exception as exc:  # noqa: BLE001
             raise UvPackError(
                 f"Failed to download embedded runtime from {url!r}: {exc}",
             ) from exc
+        part_path.replace(cache_zip)
+    finally:
+        if part_path.is_file():
+            try:
+                part_path.unlink()
+            except OSError:
+                pass
 
-        import shutil
-
-        shutil.unpack_archive(str(zip_path), str(dest_dir))
+    shutil.unpack_archive(str(cache_zip), str(dest_dir))
 

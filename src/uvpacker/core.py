@@ -48,7 +48,7 @@ def pack_project(
     - Validates that ``[project.scripts]`` and/or ``[project.gui-scripts]`` and
       ``[build-system]`` are present
     - Resolves the target Python version
-    - Downloads the embedded runtime, installs deps via uv, and prepares a
+    - Obtains the embedded runtime (cached under ~/.cache/uvpacker/embed), installs deps via uv, and prepares a
       relocatable application directory.
     """
     project_dir = project_dir.resolve()
@@ -175,7 +175,7 @@ def _perform_pack(
     embedded_dir.mkdir()
     app_dir.mkdir()
 
-    info("Step 1/4: Downloading embedded runtime...")
+    info("Step 1/4: Preparing embedded runtime...")
     runtime.download_and_extract_embedded_runtime(python_version, embedded_dir)
     _patch_embedded_runtime_config(embedded_dir)
 
