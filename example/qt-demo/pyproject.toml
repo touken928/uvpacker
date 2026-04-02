@@ -7,7 +7,7 @@ dependencies = [
     "PySide6-Essentials",
 ]
 
-[project.scripts]
+[project.gui-scripts]
 qt-demo = "qt_demo.main:main"
 
 [build-system]

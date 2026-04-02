@@ -19,7 +19,7 @@
 
 - the official **CPython Embedded Runtime** for Windows (64-bit)
 - your project and dependencies installed for **`win_amd64`**
-- launchers derived from **`[project.scripts]`** (`.exe` when a template is available)
+- launchers derived from **`[project.scripts]`** (console) and **`[project.gui-scripts]`** (no console window), as `.exe` when templates are available
 
 The goal is to run on machines **without a system Python**, while keeping the build **declarative** (standard `pyproject.toml`) and **predictable**.
 
@@ -32,7 +32,7 @@ The project you pack must have:
 | Requirement | Notes |
 |-------------|--------|
 | `pyproject.toml` | Standard layout |
-| `[project.scripts]` | At least one console script |
+| `[project.scripts]` and/or `[project.gui-scripts]` | At least one entry; names must not overlap between the two tables |
 | `[build-system]` | Used to reproduce the build environment |
 | `project.requires-python` | Must be `==X.Y.*` (e.g. `==3.11.*`, `==3.12.*`) |
 
@@ -46,7 +46,7 @@ Default path: `dist/<project-name>/`
 dist/<project-name>/
   runtime/          # Windows embedded CPython
   packages/         # Your wheel + dependencies (win_amd64)
-  <script>.exe      # From [project.scripts] + small launcher template
+  <script>.exe      # Console vs GUI template from scripts / gui-scripts
 ```
 
 Launchers use `runtime\python.exe` and patch the embedded `._pth` / `.pth` file so **`..\packages`** is on `sys.path` — no dependency on a global Python install.
@@ -70,13 +70,13 @@ uvx uvpacker==0.2.1 path/to/project
 
 ## Packing pipeline
 
-1. Read and validate `pyproject.toml` (`scripts`, `build-system`, `requires-python`)
+1. Read and validate `pyproject.toml` (`scripts`, `gui-scripts`, `build-system`, `requires-python`)
 2. Resolve Python version and download `python-<version>-embed-amd64.zip`
 3. Build a wheel for the target project
 4. `uv pip install` into `packages/` with **`--python-platform x86_64-pc-windows-msvc`**
 5. Patch embedded runtime `_pth` to include `..\packages`
 6. For **your** package tree: compile `.py` → `.pyc` with the target minor via `uv run`, then remove `.py` (light obfuscation; not encryption)
-7. Generate **`.exe`** launchers (or skip if no `launcher.exe` template)
+7. Generate **`.exe`** launchers (`launcher_console.exe` / `launcher_gui.exe` templates, or skip if missing)
 
 ## Cross-platform builds
 

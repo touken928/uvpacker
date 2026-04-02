@@ -23,6 +23,8 @@ from .ui import info
 class ScriptDefinition:
     name: str
     target: str
+    # True when from [project.gui-scripts] (Windows subsystem, no console).
+    gui: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -43,7 +45,8 @@ def pack_project(
 
     This function:
     - Parses ``pyproject.toml`` in ``project_dir``
-    - Validates that ``[project.scripts]`` and ``[build-system]`` are present
+    - Validates that ``[project.scripts]`` and/or ``[project.gui-scripts]`` and
+      ``[build-system]`` are present
     - Resolves the target Python version
     - Downloads the embedded runtime, installs deps via uv, and prepares a
       relocatable application directory.
@@ -94,7 +97,12 @@ def _load_project_config(pyproject_path: pathlib.Path) -> ProjectConfig:
     scripts: list[ScriptDefinition] = []
     for key, value in scripts_table.items():
         if isinstance(value, str):
-            scripts.append(ScriptDefinition(name=key, target=value))
+            scripts.append(ScriptDefinition(name=key, target=value, gui=False))
+
+    gui_table = project.get("gui-scripts") or {}
+    for key, value in gui_table.items():
+        if isinstance(value, str):
+            scripts.append(ScriptDefinition(name=key, target=value, gui=True))
 
     build_system = data.get("build-system") or {}
 
@@ -110,8 +118,14 @@ def _load_project_config(pyproject_path: pathlib.Path) -> ProjectConfig:
 def _validate_project_config(cfg: ProjectConfig) -> None:
     if not cfg.scripts:
         raise UvPackError(
-            "No [project.scripts] defined in pyproject.toml; "
-            "at least one console script entry is required.",
+            "No [project.scripts] or [project.gui-scripts] defined in pyproject.toml; "
+            "at least one entry is required.",
+        )
+    names = [s.name for s in cfg.scripts]
+    if len(names) != len(set(names)):
+        raise UvPackError(
+            "Duplicate script names between [project.scripts] and [project.gui-scripts]; "
+            "each name must be unique.",
         )
     if not cfg.build_system:
         raise UvPackError(
@@ -330,15 +344,13 @@ def _create_exe_launchers(
     """
     Generate Windows `.exe` launchers backed by a small C shim.
 
-    These launchers are optional: if no template is available (for example when
-    running on a non-Windows host without mingw), this step is silently skipped
-    and `.cmd` launchers are still generated.
-    """
-    template = exe_launcher.ensure_template_exe()
-    if template is None:
-        info("Executable launchers not created: no launcher.exe template available.")
-        return
+    Console entries use a PE console template; ``[project.gui-scripts]`` entries
+    use a Windows/GUI subsystem template (no console window).
 
+    These launchers are optional: if no template is available (for example when
+    running on a non-Windows host without mingw), the corresponding launchers
+    are skipped.
+    """
     for script in scripts:
         module, _, func = script.target.partition(":")
         if not module:
@@ -348,7 +360,12 @@ def _create_exe_launchers(
             script_name=script.name,
             module=module,
             func=func or "main",
+            gui=script.gui,
         )
         if created is None:
-            info(f"Failed to create executable launcher for script {script.name!r}.")
+            kind = "GUI" if script.gui else "console"
+            info(
+                f"Failed to create executable launcher for script {script.name!r} "
+                f"({kind} template missing).",
+            )
 

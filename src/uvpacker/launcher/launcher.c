@@ -208,7 +208,7 @@ static int run_python(const wchar_t *exePath, const char *payloadJson) {
     return ret;
 }
 
-int wmain() {
+static int run_launcher(void) {
     wchar_t exePath[MAX_PATH];
     if (!GetModuleFileNameW(NULL, exePath, MAX_PATH)) {
         return 1;
@@ -225,3 +225,18 @@ int wmain() {
     return ret;
 }
 
+#ifdef UVPACKER_GUI_SUBSYSTEM
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLine, int nCmdShow) {
+    (void)hInstance;
+    (void)hPrevInstance;
+    (void)lpCmdLine;
+    (void)nCmdShow;
+    return run_launcher();
+}
+#else
+int wmain(int argc, wchar_t **argv) {
+    (void)argc;
+    (void)argv;
+    return run_launcher();
+}
+#endif
