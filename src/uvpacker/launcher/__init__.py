@@ -25,11 +25,6 @@ def get_template_exe(gui: bool) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def ensure_template_exe(gui: bool) -> Path | None:
-    """Return path to bundled ``console.exe`` or ``gui.exe``, or None if missing."""
-    return get_template_exe(gui=gui)
-
-
 def _make_payload(config: Mapping[str, Any]) -> bytes:
     data = json.dumps(config, separators=(",", ":")).encode("utf-8")
     footer = FOOTER_STRUCT.pack(MAGIC, len(data), 0)
@@ -49,7 +44,7 @@ def build_launcher_for_script(
 
     Returns the path to the created launcher, or None if no template is available.
     """
-    template = ensure_template_exe(gui=gui)
+    template = get_template_exe(gui=gui)
     if template is None:
         return None
 
