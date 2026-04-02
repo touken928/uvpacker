@@ -11,6 +11,8 @@
   <a href="https://github.com/touken928/uvpacker/stargazers"><img src="https://img.shields.io/github/stars/touken928/uvpacker?style=for-the-badge&color=yellow&logo=github" alt="GitHub stars"></a>
 </p>
 
+<p align="center"><a href="README_zh.md">简体中文</a></p>
+
 ---
 
 ## Overview
@@ -63,10 +65,10 @@ uvx uvpacker path/to/project
 uvx uvpacker path/to/project -o path/to/output
 
 # Pin version
-uvx uvpacker==0.3.1 path/to/project
+uvx uvpacker==0.3.2 path/to/project
 
 # Mainland China (example): Tsinghua PyPI for uvx + --tsinghua for embed / uv inside uvpacker
-UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple uvx uvpacker==0.3.1 path/to/project --tsinghua
+UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple uvx uvpacker path/to/project --tsinghua
 ```
 
 `UV_DEFAULT_INDEX` makes `uvx` install uvpacker from Tsinghua PyPI; `--tsinghua` applies Tsinghua sources during packing (embed + `uv`).
