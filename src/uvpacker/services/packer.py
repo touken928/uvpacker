@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import dataclasses
 import pathlib
-import re
 import shutil
 import subprocess
 import sys
@@ -13,11 +12,11 @@ try:  # Python 3.11+
 except ModuleNotFoundError:  # pragma: no cover
     tomllib = None  # type: ignore[assignment]
 
-from . import launcher as exe_launcher
-from . import runtime, uvclient
-from .errors import UvPackError
-from .sources import DEFAULT_DOWNLOAD_CONFIG, PackDownloadConfig
-from .ui import info
+from .. import launcher as exe_launcher
+from ..domain.errors import BuildError, ConfigError
+from ..domain.sources import DEFAULT_DOWNLOAD_CONFIG, PackDownloadConfig
+from ..infra import runtime_client, uv_client
+from ..view.ui import info, kv, step, success
 
 
 @dataclasses.dataclass(frozen=True)
@@ -37,6 +36,13 @@ class ProjectConfig:
     build_system: Mapping[str, Any]
 
 
+@dataclasses.dataclass(frozen=True)
+class PackLayout:
+    root: pathlib.Path
+    runtime: pathlib.Path
+    packages: pathlib.Path
+
+
 def pack_project(
     project_dir: pathlib.Path,
     output_dir: pathlib.Path | None = None,
@@ -54,40 +60,30 @@ def pack_project(
     - Obtains the embedded runtime (cached under ~/.cache/uvpacker/embed), installs deps via uv, and prepares a
       relocatable application directory.
 
-    Pass ``download`` (CLI: ``--tsinghua``) to use a non-default embed index / ``uv`` PyPI index;
-    see ``uvpacker.sources.PackDownloadConfig`` and ``PACK_DOWNLOAD_PRESETS``.
+    Pass ``download`` to override the embedded-runtime source; by default
+    uvpacker always uses python.org.
     """
     project_dir = project_dir.resolve()
-    if not project_dir.is_dir():
-        raise UvPackError(f"Project directory does not exist: {project_dir}")
-
-    pyproject = project_dir / "pyproject.toml"
-    if not pyproject.is_file():
-        raise UvPackError(f"No pyproject.toml found in {project_dir}")
+    pyproject = _require_project_dir(project_dir)
 
     cfg = _load_project_config(pyproject)
     _validate_project_config(cfg)
-    info(f"Project: {cfg.name}")
+    kv("Project", cfg.name)
 
     dl = download if download is not None else DEFAULT_DOWNLOAD_CONFIG
-    if dl != DEFAULT_DOWNLOAD_CONFIG:
-        parts = [f"embed index {dl.embed_listing_url()!r}"]
-        if dl.pypi_default_index is not None:
-            parts.append(f"uv default index {dl.pypi_default_index!r}")
-        info("Non-default download sources: " + "; ".join(parts) + ".")
+    _log_download_sources(dl)
 
-    info("Resolving target Python runtime...")
-    minor = runtime.require_exact_minor_from_requires(cfg.requires_python)
-    target_python = runtime.resolve_latest_embed_for_minor(minor, download=dl)
-    info(f"Using Python {target_python} (win_amd64 embedded)")
+    target_python = _resolve_target_python_version(cfg, download=dl)
+    kv("Python", f"{target_python} (win_amd64 embedded)")
 
     resolved_output = _resolve_output_dir(cfg, project_dir, output_dir)
-    info(f"Output: {resolved_output}")
+    kv("Output", resolved_output)
+    layout = _prepare_layout(resolved_output)
 
     _perform_pack(
         cfg=cfg,
         project_dir=project_dir,
-        output_dir=resolved_output,
+        layout=layout,
         python_version=target_python,
         download=dl,
     )
@@ -96,14 +92,14 @@ def pack_project(
 def _load_project_config(pyproject_path: pathlib.Path) -> ProjectConfig:
     text = pyproject_path.read_bytes()
     if tomllib is None:
-        raise UvPackError("tomllib is not available; Python 3.11+ is required.")
+        raise ConfigError("tomllib is not available; Python 3.11+ is required.")
 
     data = tomllib.loads(text.decode("utf-8"))
 
     project = data.get("project") or {}
     name = project.get("name")
     if not isinstance(name, str) or not name:
-        raise UvPackError("`project.name` must be set in pyproject.toml.")
+        raise ConfigError("`project.name` must be set in pyproject.toml.")
 
     requires_python = project.get("requires-python")
 
@@ -131,35 +127,50 @@ def _load_project_config(pyproject_path: pathlib.Path) -> ProjectConfig:
 
 def _validate_project_config(cfg: ProjectConfig) -> None:
     if not cfg.scripts:
-        raise UvPackError(
+        raise ConfigError(
             "No [project.scripts] or [project.gui-scripts] defined in pyproject.toml; "
             "at least one entry is required.",
         )
     names = [s.name for s in cfg.scripts]
     if len(names) != len(set(names)):
-        raise UvPackError(
+        raise ConfigError(
             "Duplicate script names between [project.scripts] and [project.gui-scripts]; "
             "each name must be unique.",
         )
     if not cfg.build_system:
-        raise UvPackError(
+        raise ConfigError(
             "No [build-system] table found in pyproject.toml; "
             "uvpack relies on it to reproduce the build environment.",
         )
 
-    # 版本策略约束：必须采用 `==X.Y.*` 形式，确保次版本固定，由 uvpack 解析出
-    # 对应的最新补丁版本。
-    if not cfg.requires_python:
-        raise UvPackError(
-            "`project.requires-python` must be set and use the '==X.Y.*' format.",
-        )
+    # Delegate requires-python format validation to runtime parser so there is
+    # a single source of truth for version constraints.
+    runtime_client.require_exact_minor_from_requires(cfg.requires_python)
 
-    pattern = r"^==\d+\.\d+\.\*$"
-    if not re.fullmatch(pattern, cfg.requires_python.strip()):
-        raise UvPackError(
-            "uvpack requires `project.requires-python` to be an exact minor "
-            "constraint of the form '==X.Y.*', for example '==3.11.*'.",
-        )
+
+def _require_project_dir(project_dir: pathlib.Path) -> pathlib.Path:
+    if not project_dir.is_dir():
+        raise ConfigError(f"Project directory does not exist: {project_dir}")
+    pyproject = project_dir / "pyproject.toml"
+    if not pyproject.is_file():
+        raise ConfigError(f"No pyproject.toml found in {project_dir}")
+    return pyproject
+
+
+def _log_download_sources(download: PackDownloadConfig) -> None:
+    if download == DEFAULT_DOWNLOAD_CONFIG:
+        return
+    info(f"Non-default embed index {download.embed_listing_url()!r}.")
+
+
+def _resolve_target_python_version(
+    cfg: ProjectConfig,
+    *,
+    download: PackDownloadConfig,
+) -> str:
+    info("Resolving target Python runtime...")
+    minor = runtime_client.require_exact_minor_from_requires(cfg.requires_python)
+    return runtime_client.resolve_latest_embed_for_minor(minor, download=download)
 
 
 def _resolve_output_dir(
@@ -174,56 +185,58 @@ def _resolve_output_dir(
     return dist_dir / cfg.name
 
 
-def _perform_pack(
-    cfg: ProjectConfig,
-    project_dir: pathlib.Path,
-    output_dir: pathlib.Path,
-    python_version: str,
-    *,
-    download: PackDownloadConfig,
-) -> None:
+def _prepare_layout(output_dir: pathlib.Path) -> PackLayout:
     if output_dir.exists():
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-
     embedded_dir = output_dir / "runtime"
     app_dir = output_dir / "packages"
     embedded_dir.mkdir()
     app_dir.mkdir()
+    return PackLayout(root=output_dir, runtime=embedded_dir, packages=app_dir)
 
-    info("Step 1/4: Preparing embedded runtime...")
-    runtime.download_and_extract_embedded_runtime(
+
+def _perform_pack(
+    cfg: ProjectConfig,
+    project_dir: pathlib.Path,
+    layout: PackLayout,
+    python_version: str,
+    *,
+    download: PackDownloadConfig,
+) -> None:
+    step(1, 4, "Preparing embedded runtime...")
+    runtime_client.download_and_extract_embedded_runtime(
         python_version,
-        embedded_dir,
+        layout.runtime,
         download=download,
     )
-    _patch_embedded_runtime_config(embedded_dir)
+    _patch_embedded_runtime_config(layout.runtime)
 
-    info("Step 2/4: Installing project and dependencies into packages/...")
-    uvclient.install_project_with_uv(
+    step(2, 4, "Installing project and dependencies into packages/...")
+    uv_client.install_project_with_uv(
         project_dir=project_dir,
-        target_dir=app_dir,
+        target_dir=layout.packages,
         target_python_version=python_version,
         download=download,
     )
 
-    info("Step 3/4: Stripping source .py files for the target project (bytecode-only payload)...")
+    step(3, 4, "Stripping source .py files for the target project (bytecode-only payload)...")
     # Use the same Python minor version as the embedded runtime when compiling
     # bytecode via `uv run`, so that .pyc files match the target environment.
     py_parts = python_version.split(".")
     target_minor = ".".join(py_parts[:2]) if len(py_parts) >= 2 else python_version
     _strip_source_to_pyc(
-        app_dir=app_dir,
+        app_dir=layout.packages,
         project_name=cfg.name,
         target_python_minor=target_minor,
     )
 
-    info("Step 4/4: Generating launchers...")
+    step(4, 4, "Generating launchers...")
     _create_exe_launchers(
         scripts=cfg.scripts,
-        launchers_dir=output_dir,
+        launchers_dir=layout.root,
     )
-    info("Done.")
+    success("Done.")
 
 
 def _patch_embedded_runtime_config(embedded_dir: pathlib.Path) -> None:
@@ -303,13 +316,13 @@ def _strip_source_to_pyc(
                 text=True,
             )
         except OSError as exc:
-            raise UvPackError(
+            raise BuildError(
                 f"Failed to invoke 'uv' to compile bytecode for {pkg_dir.name!r}: {exc}",
             ) from exc
 
         if proc.returncode != 0:
             detail = (proc.stderr or proc.stdout or "").strip()
-            raise UvPackError(
+            raise BuildError(
                 f"'uv run --python {target_python_minor} python -m compileall' "
                 f"failed for {pkg_dir.name!r}: {detail}",
             )
@@ -321,41 +334,6 @@ def _strip_source_to_pyc(
             except OSError:
                 # Best-effort: if we cannot delete a file, continue.
                 continue
-
-
-def _create_cmd_launchers(
-    scripts: list[ScriptDefinition],
-    embedded_dir: pathlib.Path,
-    app_dir: pathlib.Path,
-    launchers_dir: pathlib.Path,
-) -> None:
-    """
-    Generate simple `.cmd` launchers that:
-    - set up PATH to include the embedded runtime
-    - execute the appropriate console script via the embedded Python.
-
-    A future version can replace these with compiled .exe shims if desired.
-    """
-    for script in scripts:
-        launcher_path = launchers_dir / f"{script.name}.cmd"
-        module, _, func = script.target.partition(":")
-        if not module:
-            # Skip invalid entry.
-            continue
-
-        # Execute the configured callable `module:func` via a tiny `-c` stub so
-        # that we do not require the presence of a `__main__` module/package.
-        target_call = f"from {module} import {func or 'main'} as _f; raise SystemExit(_f())"
-        cmd_content = textwrap.dedent(
-            f"""\
-            @echo off
-            setlocal
-            set "UVPACK_APP=%~dp0packages"
-            "%~dp0runtime\\python.exe" -c "{target_call}" %*
-            endlocal
-            """,
-        )
-        launcher_path.write_text(cmd_content, encoding="utf-8")
 
 
 def _create_exe_launchers(
@@ -389,4 +367,3 @@ def _create_exe_launchers(
                 f"Failed to create executable launcher for script {script.name!r} "
                 f"({kind} template missing).",
             )
-

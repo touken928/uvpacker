@@ -8,6 +8,6 @@ from `pyproject.toml` via `[project.scripts]`.
 
 from __future__ import annotations
 
-from .cli import main
+from .app.cli import main
 
 __all__ = ["main"]

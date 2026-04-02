@@ -38,7 +38,7 @@
 | `[build-system]` | 用于复现构建环境 |
 | `project.requires-python` | 必须为 `==X.Y.*`（例如 `==3.11.*`、`==3.12.*`） |
 
-`uvpacker` 会选取该次版本在 [python.org](https://www.python.org/downloads/) 上提供 **`embed-amd64`** 的**最新补丁版**。
+`uvpacker` 会从 [python.org](https://www.python.org/downloads/) 选取该次版本提供 **`embed-amd64`** 的**最新补丁版**。
 
 ## 输出目录结构
 
@@ -55,23 +55,20 @@ dist/<项目名>/
 
 ## 安装与用法
 
-推荐使用 **`uvx`**，以便自动使用 `uv`。
+推荐使用 `uvx` 运行。
 
 ```bash
-# 打包项目（默认输出：./dist/<项目名>）
-uvx uvpacker path/to/project
+# 构建打包（默认输出：./dist/<项目名>）
+uvx uvpacker build path/to/project
 
 # 指定输出目录
-uvx uvpacker path/to/project -o path/to/output
+uvx uvpacker build path/to/project -o path/to/output
 
-# 固定 uvpacker 版本
-uvx uvpacker==0.3.2 path/to/project
-
-# 中国大陆示例：uvx 用清华 PyPI；--tsinghua 使打包内 embed 与 uv 也走清华源
-UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple uvx uvpacker path/to/project --tsinghua
+# 缓存管理
+uvx uvpacker cache clear
 ```
 
-`UV_DEFAULT_INDEX` 让 `uvx` 从清华 PyPI 安装 uvpacker；`--tsinghua` 在打包过程中对 embed 下载与 `uv` 使用清华镜像（`uv build` / `uv pip install`）。
+`uvpacker cache clear` 仅清理嵌入式 Python runtime 缓存（`~/.cache/uvpacker/embed` 或 `$XDG_CACHE_HOME/uvpacker/embed`）；依赖包相关缓存由 `uv` 管理。
 
 > **说明：** 已在 **`uv` 0.11.x** 下测试；新版本 `uv` 若变更 CLI，请反馈或固定版本。
 

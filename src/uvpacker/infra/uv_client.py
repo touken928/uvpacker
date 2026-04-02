@@ -4,18 +4,20 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 
-from .errors import UvPackError
-from .sources import DEFAULT_DOWNLOAD_CONFIG, PackDownloadConfig
-
+from ..domain.errors import BuildError
+from ..domain.sources import DEFAULT_DOWNLOAD_CONFIG, PackDownloadConfig
 
 WINDOWS_AMD64_UV_PLATFORM = "x86_64-pc-windows-msvc"
 
 
-def _uv_default_index_args(download: PackDownloadConfig) -> list[str]:
-    if download.pypi_default_index is None:
-        return []
-    return ["--default-index", download.pypi_default_index]
+@dataclass(frozen=True)
+class InstallRequest:
+    project_dir: pathlib.Path
+    target_dir: pathlib.Path
+    target_python_version: str
+    download: PackDownloadConfig
 
 
 def install_project_with_uv(
@@ -34,35 +36,22 @@ def install_project_with_uv(
     3. Use `uv pip install` with an explicit target platform so dependency
        resolution always selects Windows amd64 wheels.
     """
+    request = InstallRequest(
+        project_dir=project_dir,
+        target_dir=target_dir,
+        target_python_version=target_python_version,
+        download=download,
+    )
     with tempfile.TemporaryDirectory() as tmp:
         wheel_dir = pathlib.Path(tmp)
-        wheel_path = _build_project_wheel(project_dir, wheel_dir, download=download)
+        wheel_path = _build_project_wheel(request.project_dir, wheel_dir, download=request.download)
         _validate_built_wheel(wheel_path)
-
-        cmd = [
-            "uv",
-            "pip",
-            "install",
-            *_uv_default_index_args(download),
-            "--python",
-            sys.executable,
-            "--target",
-            str(target_dir),
-            "--python-version",
-            _python_major_minor(target_python_version),
-            "--python-platform",
-            WINDOWS_AMD64_UV_PLATFORM,
-            "--only-binary",
-            ":all:",
-            "--find-links",
-            str(wheel_dir),
-            str(wheel_path),
-        ]
+        cmd = _build_install_command(request=request, wheel_dir=wheel_dir, wheel_path=wheel_path)
 
         try:
-            _run_command(cmd, cwd=project_dir)
-        except UvPackError as exc:
-            raise UvPackError(f"Dependency install failed. {exc}") from exc
+            _run_command(cmd, cwd=request.project_dir)
+        except BuildError as exc:
+            raise BuildError(f"Dependency install failed. {exc}") from exc
 
 
 def _build_project_wheel(
@@ -74,7 +63,6 @@ def _build_project_wheel(
     cmd = [
         "uv",
         "build",
-        *_uv_default_index_args(download),
         "--wheel",
         "--out-dir",
         str(wheel_dir),
@@ -83,12 +71,12 @@ def _build_project_wheel(
 
     try:
         _run_command(cmd, cwd=project_dir)
-    except UvPackError as exc:
-        raise UvPackError(f"Wheel build failed. {exc}") from exc
+    except BuildError as exc:
+        raise BuildError(f"Wheel build failed. {exc}") from exc
 
     wheels = sorted(wheel_dir.glob("*.whl"))
     if len(wheels) != 1:
-        raise UvPackError(
+        raise BuildError(
             "Expected exactly one wheel for the local project build, "
             f"found {len(wheels)}.",
         )
@@ -104,13 +92,13 @@ def _validate_built_wheel(wheel_path: pathlib.Path) -> None:
     """
     platform_tag = wheel_path.stem.split("-")[-1]
     if sys.platform != "win32" and platform_tag != "any":
-        raise UvPackError(
+        raise BuildError(
             "Cross-platform packaging currently requires the local project to "
             "build a pure-Python wheel. Native-extension projects must be built "
             "on Windows so the project wheel matches win_amd64.",
         )
     if sys.platform == "win32" and platform_tag not in {"any", "win_amd64"}:
-        raise UvPackError(
+        raise BuildError(
             "The built project wheel is not compatible with win_amd64: "
             f"{wheel_path.name}",
         )
@@ -119,8 +107,34 @@ def _validate_built_wheel(wheel_path: pathlib.Path) -> None:
 def _python_major_minor(version: str) -> str:
     parts = version.split(".")
     if len(parts) < 2:
-        raise UvPackError(f"Invalid Python version {version!r}.")
+        raise BuildError(f"Invalid Python version {version!r}.")
     return ".".join(parts[:2])
+
+
+def _build_install_command(
+    *,
+    request: InstallRequest,
+    wheel_dir: pathlib.Path,
+    wheel_path: pathlib.Path,
+) -> list[str]:
+    return [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        sys.executable,
+        "--target",
+        str(request.target_dir),
+        "--python-version",
+        _python_major_minor(request.target_python_version),
+        "--python-platform",
+        WINDOWS_AMD64_UV_PLATFORM,
+        "--only-binary",
+        ":all:",
+        "--find-links",
+        str(wheel_dir),
+        str(wheel_path),
+    ]
 
 
 def _run_command(cmd: list[str], cwd: pathlib.Path) -> None:
@@ -133,7 +147,7 @@ def _run_command(cmd: list[str], cwd: pathlib.Path) -> None:
             text=True,
         )
     except OSError as exc:
-        raise UvPackError(f"Cannot run command {cmd[0]!r}: {exc}") from exc
+        raise BuildError(f"Cannot run command {cmd[0]!r}: {exc}") from exc
 
     if proc.returncode == 0:
         return
@@ -141,7 +155,7 @@ def _run_command(cmd: list[str], cwd: pathlib.Path) -> None:
     stderr = (proc.stderr or "").strip()
     stdout = (proc.stdout or "").strip()
     detail = _tail(stderr or stdout)
-    raise UvPackError(
+    raise BuildError(
         f"Command failed ({cmd[0]}), exit={proc.returncode}. {detail}",
     )
 

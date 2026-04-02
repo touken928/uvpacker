@@ -55,23 +55,20 @@ Launchers use `runtime\python.exe` and patch the embedded `._pth` / `.pth` file 
 
 ## Installation & usage
 
-Recommended: **`uvx`** so `uv` is available automatically.
+Recommended: run with `uvx`.
 
 ```bash
-# Pack a project (default output: ./dist/<project-name>)
-uvx uvpacker path/to/project
+# Build package output (default output: ./dist/<project-name>)
+uvx uvpacker build path/to/project
 
 # Explicit output directory
-uvx uvpacker path/to/project -o path/to/output
+uvx uvpacker build path/to/project -o path/to/output
 
-# Pin version
-uvx uvpacker==0.3.2 path/to/project
-
-# Mainland China (example): Tsinghua PyPI for uvx + --tsinghua for embed / uv inside uvpacker
-UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple uvx uvpacker path/to/project --tsinghua
+# Cache management
+uvx uvpacker cache clear
 ```
 
-`UV_DEFAULT_INDEX` makes `uvx` install uvpacker from Tsinghua PyPI; `--tsinghua` applies Tsinghua sources during packing (embed + `uv`).
+`uvpacker cache clear` only removes embedded Python runtime cache (`~/.cache/uvpacker/embed` or `$XDG_CACHE_HOME/uvpacker/embed`); dependency-package cache is managed by `uv`.
 
 > **Note:** Tested with **`uv` 0.11.x**. Newer `uv` releases may change CLI behavior; report or pin versions if something breaks.
 
