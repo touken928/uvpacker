@@ -1,7 +1,7 @@
 <h1 align="center">uvpacker</h1>
 
 <p align="center">
-  <strong>Windows-oriented CLI packer for Python projects using <code>uv</code> and the CPython Embedded Runtime.</strong>
+  <strong>Windows-oriented CLI packer for Python projects using <code>uv</code> and the CPython Embedded Runtime; run it on Linux, macOS, or Windows to produce a self-contained <code>win_amd64</code> app directory (not a single-file exe).</strong>
 </p>
 
 <p align="center">
@@ -9,10 +9,6 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL%20v3-blue.svg?style=for-the-badge" alt="License: GPL v3"></a>
   <a href="https://pypi.org/project/uvpacker/"><img src="https://img.shields.io/pypi/v/uvpacker.svg?style=for-the-badge&logo=pypi&logoColor=white&label=pypi" alt="PyPI version"></a>
   <a href="https://github.com/touken928/uvpacker/stargazers"><img src="https://img.shields.io/github/stars/touken928/uvpacker?style=for-the-badge&color=yellow&logo=github" alt="GitHub stars"></a>
-</p>
-
-<p align="center">
-  Run the tool on Linux, macOS, or Windows &mdash; output is always a self-contained <code>win_amd64</code> app directory (not a single-file exe).
 </p>
 
 ---
