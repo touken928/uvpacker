@@ -63,7 +63,7 @@ uvx uvpacker path/to/project
 uvx uvpacker path/to/project -o path/to/output
 
 # Pin version
-uvx uvpacker==0.3.0 path/to/project
+uvx uvpacker==0.3.1 path/to/project
 ```
 
 > **Note:** Tested with **`uv` 0.11.x**. Newer `uv` releases may change CLI behavior; report or pin versions if something breaks.
@@ -71,7 +71,7 @@ uvx uvpacker==0.3.0 path/to/project
 ## Packing pipeline
 
 1. Read and validate `pyproject.toml` (`scripts`, `gui-scripts`, `build-system`, `requires-python`)
-2. Resolve Python version and download `python-<version>-embed-amd64.zip`
+2. Resolve Python version and obtain `python-<version>-embed-amd64.zip` (downloaded once, then cached under `~/.cache/uvpacker/embed`, or `$XDG_CACHE_HOME/uvpacker/embed` if set)
 3. Build a wheel for the target project
 4. `uv pip install` into `packages/` with **`--python-platform x86_64-pc-windows-msvc`**
 5. Patch embedded runtime `_pth` to include `..\packages`

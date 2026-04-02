@@ -1,6 +1,6 @@
 [project]
 name = "uvpacker"
-version = "0.3.0"
+version = "0.3.1"
 description = "A Windows-oriented CLI packer for Python projects using uv and the Python Embedded Runtime."
 readme = "README.md"
 requires-python = "==3.12.*"
