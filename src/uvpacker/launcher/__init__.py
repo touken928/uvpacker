@@ -11,8 +11,8 @@ from typing import Any, Mapping
 MAGIC = b"UVPKLAUN"
 FOOTER_STRUCT = struct.Struct("<8sII")
 
-TEMPLATE_CONSOLE = "launcher_console.exe"
-TEMPLATE_GUI = "launcher_gui.exe"
+TEMPLATE_CONSOLE = "console.exe"
+TEMPLATE_GUI = "gui.exe"
 
 
 def _get_package_dir() -> Path:
@@ -95,7 +95,7 @@ def ensure_template_exe(gui: bool) -> Path | None:
     Ensure a launcher template exists for the requested subsystem and return its path.
 
     Preference order:
-    1. Bundled template in the package (``launcher_console.exe`` / ``launcher_gui.exe``).
+    1. Bundled template in the package (``console.exe`` / ``gui.exe``).
     2. Best-effort compilation via mingw (development / CI), which builds both templates.
     """
     exe = get_template_exe(gui=gui)

@@ -1,7 +1,7 @@
 ## uvpacker launcher
 
 This directory contains the native Windows launcher used by `uvpacker` to start
-packed applications via small `launcher_*.exe` shims instead of a `.cmd` script.
+packed applications via small `console.exe` / `gui.exe` template shims instead of a `.cmd` script.
 
 ### How it works
 
@@ -15,8 +15,8 @@ packed applications via small `launcher_*.exe` shims instead of a `.cmd` script.
   - Loads `python3.dll`, resolves `Py_Main`, and runs:
     `from <module> import <func> as _f; raise SystemExit(_f())`.
 - Two PE templates are built from the same source:
-  - **`launcher_console.exe`** — console subsystem (for `[project.scripts]`).
-  - **`launcher_gui.exe`** — Windows subsystem, no console window (for
+  - **`console.exe`** — console subsystem (for `[project.scripts]`).
+  - **`gui.exe`** — Windows subsystem, no console window (for
     `[project.gui-scripts]`).
 - The Python package (`uvpacker.launcher`) locates or cross-compiles these
   templates and appends per-script JSON + footer to produce `<script>.exe` in
@@ -29,13 +29,13 @@ From `src/uvpacker/launcher`:
 **Console template**
 
 ```bash
-x86_64-w64-mingw32-gcc -municode -O2 -static -s -o launcher_console.exe launcher.c
+x86_64-w64-mingw32-gcc -municode -O2 -static -s -o console.exe launcher.c
 ```
 
 **GUI template (no console window)**
 
 ```bash
-x86_64-w64-mingw32-gcc -municode -O2 -static -s -mwindows -DUVPACKER_GUI_SUBSYSTEM -o launcher_gui.exe launcher.c
+x86_64-w64-mingw32-gcc -municode -O2 -static -s -mwindows -DUVPACKER_GUI_SUBSYSTEM -o gui.exe launcher.c
 ```
 
 Notes:
@@ -49,9 +49,9 @@ Notes:
 ```bash
 brew install mingw-w64
 cd src/uvpacker/launcher
-x86_64-w64-mingw32-gcc -municode -O2 -static -s -o launcher_console.exe launcher.c
-x86_64-w64-mingw32-gcc -municode -O2 -static -s -mwindows -DUVPACKER_GUI_SUBSYSTEM -o launcher_gui.exe launcher.c
+x86_64-w64-mingw32-gcc -municode -O2 -static -s -o console.exe launcher.c
+x86_64-w64-mingw32-gcc -municode -O2 -static -s -mwindows -DUVPACKER_GUI_SUBSYSTEM -o gui.exe launcher.c
 ```
 
-Check in both `launcher_console.exe` and `launcher_gui.exe` so they ship inside
+Check in both `console.exe` and `gui.exe` so they ship inside
 the `uvpacker` wheel.

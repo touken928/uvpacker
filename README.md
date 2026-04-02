@@ -76,7 +76,7 @@ uvx uvpacker==0.2.1 path/to/project
 4. `uv pip install` into `packages/` with **`--python-platform x86_64-pc-windows-msvc`**
 5. Patch embedded runtime `_pth` to include `..\packages`
 6. For **your** package tree: compile `.py` → `.pyc` with the target minor via `uv run`, then remove `.py` (light obfuscation; not encryption)
-7. Generate **`.exe`** launchers (`launcher_console.exe` / `launcher_gui.exe` templates, or skip if missing)
+7. Generate **`.exe`** launchers (`console.exe` / `gui.exe` templates, or skip if missing)
 
 ## Cross-platform builds
 
