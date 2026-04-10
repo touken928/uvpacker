@@ -1,18 +1,7 @@
 #include <windows.h>
 
-#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-
-typedef struct Footer {
-    char magic[8];
-    uint32_t metadataSize;
-    uint32_t archiveSize;
-    uint32_t version;
-} Footer;
-
-static const char MAGIC[8] = {'U', 'V', 'P', 'K', 'L', 'A', 'U', 'N'};
-static const uint32_t PAYLOAD_VERSION = 1;
 
 static const char INIT_SCRIPT[] =
     "import importlib.abc as _abc\n"
@@ -156,84 +145,6 @@ static const char INIT_SCRIPT[] =
     "_sys.meta_path.insert(0, _MemFinder())\n"
     "_mod = __import__(_ENTRY_MODULE, fromlist=[_ENTRY_FUNC])\n"
     "raise SystemExit(getattr(_mod, _ENTRY_FUNC)())\n";
-
-static int read_metadata(const wchar_t *exePath, char **outBuf, uint32_t *outSize) {
-    HANDLE hFile = CreateFileW(
-        exePath,
-        GENERIC_READ,
-        FILE_SHARE_READ,
-        NULL,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        NULL
-    );
-    if (hFile == INVALID_HANDLE_VALUE) {
-        return 1;
-    }
-
-    LARGE_INTEGER fileSizeLi;
-    if (!GetFileSizeEx(hFile, &fileSizeLi)) {
-        CloseHandle(hFile);
-        return 1;
-    }
-
-    if (fileSizeLi.QuadPart < (LONGLONG)sizeof(Footer)) {
-        CloseHandle(hFile);
-        return 1;
-    }
-
-    LARGE_INTEGER pos;
-    pos.QuadPart = fileSizeLi.QuadPart - (LONGLONG)sizeof(Footer);
-    if (!SetFilePointerEx(hFile, pos, NULL, FILE_BEGIN)) {
-        CloseHandle(hFile);
-        return 1;
-    }
-
-    Footer footer;
-    DWORD bytesRead = 0;
-    if (!ReadFile(hFile, &footer, (DWORD)sizeof(footer), &bytesRead, NULL) ||
-        bytesRead != sizeof(footer)) {
-        CloseHandle(hFile);
-        return 1;
-    }
-
-    if (memcmp(footer.magic, MAGIC, 8) != 0 || footer.version != PAYLOAD_VERSION) {
-        CloseHandle(hFile);
-        return 1;
-    }
-
-    if (footer.metadataSize == 0 ||
-        footer.metadataSize > (uint32_t)(fileSizeLi.QuadPart - sizeof(Footer)) ||
-        footer.archiveSize > (uint32_t)(fileSizeLi.QuadPart - sizeof(Footer) - footer.metadataSize)) {
-        CloseHandle(hFile);
-        return 1;
-    }
-
-    pos.QuadPart = fileSizeLi.QuadPart - sizeof(Footer) - footer.metadataSize;
-    if (!SetFilePointerEx(hFile, pos, NULL, FILE_BEGIN)) {
-        CloseHandle(hFile);
-        return 1;
-    }
-
-    char *buf = (char *)HeapAlloc(GetProcessHeap(), 0, footer.metadataSize + 1);
-    if (!buf) {
-        CloseHandle(hFile);
-        return 1;
-    }
-
-    if (!ReadFile(hFile, buf, footer.metadataSize, &bytesRead, NULL) ||
-        bytesRead != footer.metadataSize) {
-        HeapFree(GetProcessHeap(), 0, buf);
-        CloseHandle(hFile);
-        return 1;
-    }
-    buf[footer.metadataSize] = '\0';
-
-    CloseHandle(hFile);
-    *outBuf = buf;
-    *outSize = footer.metadataSize;
-    return 0;
-}
 
 static wchar_t *utf8_to_wide(const char *text) {
     int needed = MultiByteToWideChar(CP_UTF8, 0, text, -1, NULL, 0);
@@ -422,15 +333,7 @@ static int run_launcher(void) {
         return 1;
     }
 
-    char *payload = NULL;
-    uint32_t payloadSize = 0;
-    if (read_metadata(exePath, &payload, &payloadSize) != 0) {
-        return 1;
-    }
-
-    int ret = run_python(exePath);
-    HeapFree(GetProcessHeap(), 0, payload);
-    return ret;
+    return run_python(exePath);
 }
 
 #ifdef UVPK_GUI

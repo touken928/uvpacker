@@ -240,9 +240,11 @@ def _perform_pack(
     )
 
     step(4, 5, "Embedding the target project into launcher payloads...")
-    project_archive = _build_project_archive(layout.packages, package_roots)
-    _remove_project_roots(layout.packages, package_roots)
-    _remove_project_dist_info(layout.packages, cfg.name)
+    project_archive = _embed_project_archive(
+        layout.packages,
+        package_roots,
+        cfg.name,
+    )
 
     step(5, 5, "Generating launchers...")
     _create_exe_launchers(
@@ -311,104 +313,115 @@ def _strip_source_to_pyc(
     files for the target project, but does not make reverse engineering
     impossible.
     """
-    target_dirs: list[pathlib.Path] = []
-    for root in project_roots:
-        entry = app_dir / root
-        if entry.is_dir():
-            target_dirs.append(entry)
-
-    # Fallback: if we cannot identify a specific package directory, operate on
-    # the entire app_dir.
-    if not target_dirs:
-        target_dirs = [app_dir]
+    target_dirs = _existing_project_dirs(app_dir, project_roots) or [app_dir]
 
     for pkg_dir in target_dirs:
-        info(
-            f"Compiling .py files in {pkg_dir.name!r} to .pyc using "
-            f"Python {target_python_minor} via `uv run`...",
-        )
-        cmd = [
-            "uv",
-            "run",
-            "--python",
-            target_python_minor,
-            "python",
-            "-m",
-            "compileall",
-            "-b",
-            str(pkg_dir),
-        ]
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=str(pkg_dir),
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-        except OSError as exc:
-            raise BuildError(
-                f"Failed to invoke 'uv' to compile bytecode for {pkg_dir.name!r}: {exc}",
-            ) from exc
-
-        if proc.returncode != 0:
-            detail = (proc.stderr or proc.stdout or "").strip()
-            raise BuildError(
-                f"'uv run --python {target_python_minor} python -m compileall' "
-                f"failed for {pkg_dir.name!r}: {detail}",
-            )
-
-        # Remove .py sources now that .pyc files exist.
-        for py_file in pkg_dir.rglob("*.py"):
-            try:
-                py_file.unlink()
-            except OSError:
-                # Best-effort: if we cannot delete a file, continue.
-                continue
+        _compile_directory_tree_to_pyc(pkg_dir, target_python_minor)
+        _remove_python_sources(pkg_dir)
 
     for root in project_roots:
         module_py = app_dir / f"{root}.py"
         if module_py.is_file():
-            compiled = app_dir / f"{root}.pyc"
-            if not compiled.is_file():
-                info(
-                    f"Compiling module {module_py.name!r} to .pyc using "
-                    f"Python {target_python_minor} via `uv run`...",
-                )
-                cmd = [
-                    "uv",
-                    "run",
-                    "--python",
-                    target_python_minor,
-                    "python",
-                    "-m",
-                    "py_compile",
-                    str(module_py),
-                ]
-                try:
-                    proc = subprocess.run(
-                        cmd,
-                        cwd=str(app_dir),
-                        check=False,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                    )
-                except OSError as exc:
-                    raise BuildError(
-                        f"Failed to invoke 'uv' to compile module {module_py.name!r}: {exc}",
-                    ) from exc
-                if proc.returncode != 0:
-                    detail = (proc.stderr or proc.stdout or "").strip()
-                    raise BuildError(
-                        f"'uv run --python {target_python_minor} python -m py_compile' "
-                        f"failed for module {module_py.name!r}: {detail}",
-                    )
+            _compile_module_to_pyc(module_py, app_dir, target_python_minor)
             try:
                 module_py.unlink()
             except OSError:
                 continue
+
+
+def _existing_project_dirs(
+    app_dir: pathlib.Path,
+    project_roots: tuple[str, ...],
+) -> list[pathlib.Path]:
+    return [entry for root in project_roots if (entry := app_dir / root).is_dir()]
+
+
+def _compile_directory_tree_to_pyc(
+    pkg_dir: pathlib.Path,
+    target_python_minor: str,
+) -> None:
+    info(
+        f"Compiling .py files in {pkg_dir.name!r} to .pyc using "
+        f"Python {target_python_minor} via `uv run`...",
+    )
+    _run_uv_python(
+        target_python_minor=target_python_minor,
+        cwd=pkg_dir,
+        python_args=["-m", "compileall", "-b", str(pkg_dir)],
+        failure_message=(
+            f"'uv run --python {target_python_minor} python -m compileall' "
+            f"failed for {pkg_dir.name!r}"
+        ),
+    )
+
+
+def _compile_module_to_pyc(
+    module_py: pathlib.Path,
+    app_dir: pathlib.Path,
+    target_python_minor: str,
+) -> None:
+    compiled = module_py.with_suffix(".pyc")
+    if compiled.is_file():
+        return
+
+    info(
+        f"Compiling module {module_py.name!r} to .pyc using "
+        f"Python {target_python_minor} via `uv run`...",
+    )
+    _run_uv_python(
+        target_python_minor=target_python_minor,
+        cwd=app_dir,
+        python_args=["-m", "py_compile", str(module_py)],
+        failure_message=(
+            f"'uv run --python {target_python_minor} python -m py_compile' "
+            f"failed for module {module_py.name!r}"
+        ),
+    )
+
+
+def _run_uv_python(
+    *,
+    target_python_minor: str,
+    cwd: pathlib.Path,
+    python_args: list[str],
+    failure_message: str,
+) -> None:
+    cmd = ["uv", "run", "--python", target_python_minor, "python", *python_args]
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except OSError as exc:
+        raise BuildError(f"Failed to invoke 'uv' from {cwd}: {exc}") from exc
+
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        raise BuildError(f"{failure_message}: {detail}")
+
+
+def _remove_python_sources(pkg_dir: pathlib.Path) -> None:
+    for py_file in pkg_dir.rglob("*.py"):
+        try:
+            py_file.unlink()
+        except OSError:
+            # Best-effort: if we cannot delete a file, continue.
+            continue
+
+
+def _embed_project_archive(
+    app_dir: pathlib.Path,
+    project_roots: tuple[str, ...],
+    project_name: str,
+) -> bytes:
+    archive = _build_project_archive(app_dir, project_roots)
+    _remove_project_roots(app_dir, project_roots)
+    _remove_project_dist_info(app_dir, project_name)
+    return archive
 
 
 def _build_project_archive(
