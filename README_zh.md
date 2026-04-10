@@ -20,7 +20,8 @@
 `uvpacker` 会生成一个可直接压缩或拷贝分发的目录，其中包含：
 
 - 官方 **Windows 64 位 CPython 嵌入式运行时**
-- 已为 **`win_amd64`** 安装的项目与依赖
+- 已为 **`win_amd64`** 安装的**第三方依赖**
+- 直接嵌入到每个启动器 `.exe` 中的**项目自身包**
 - 由 **`[project.scripts]`**（控制台）与 **`[project.gui-scripts]`**（无控制台窗口）生成的启动器，在提供模板时为 `.exe`
 
 目标是在**未安装系统 Python** 的机器上运行，同时保持构建 **声明式**（标准 `pyproject.toml`）且 **可预期**。
@@ -47,11 +48,11 @@
 ```text
 dist/<项目名>/
   runtime/          # Windows 嵌入式 CPython
-  packages/         # 项目 wheel 与依赖（win_amd64）
+  packages/         # 仅第三方依赖（win_amd64）
   <脚本名>.exe      # 来自 scripts / gui-scripts 的控制台或 GUI 模板
 ```
 
-启动器通过 `runtime\python.exe` 运行，并修改嵌入式运行时中的 `._pth` / `.pth`，使 **`..\packages`** 在 `sys.path` 中，不依赖全局 Python。
+启动器会加载 `runtime\python3.dll`，修改嵌入式运行时中的 `._pth` / `.pth` 使 **`..\packages`** 在 `sys.path` 中，并从 `.exe` 尾部附加的归档中导入你的项目包，不依赖全局 Python。
 
 ## 安装与用法
 
@@ -78,9 +79,11 @@ uvx uvpacker cache clear
 2. 解析 Python 版本并获取 `python-<版本>-embed-amd64.zip`（首次下载后缓存于 `~/.cache/uvpacker/embed`，若设置了 `XDG_CACHE_HOME` 则为 `$XDG_CACHE_HOME/uvpacker/embed`）
 3. 为目标项目构建 wheel
 4. 使用 **`--python-platform x86_64-pc-windows-msvc`** 执行 `uv pip install` 到 `packages/`
-5. 修改嵌入式运行时 `_pth`，加入 `..\packages`
-6. 对**你的**项目包：用目标次版本号通过 `uv run` 将 `.py` 编译为 `.pyc`，再删除 `.py`（轻度混淆，非加密）
-7. 生成 **`.exe`** 启动器（`console.exe` / `gui.exe` 模板；若缺失则跳过）
+5. 删除 `packages/bin` / `packages/Scripts` 中宿主平台风格的脚本 shim
+6. 修改嵌入式运行时 `_pth`，加入 `..\packages`
+7. 对**你的**项目包：用目标次版本号通过 `uv run` 将 `.py` 编译为 `.pyc`，再删除 `.py`（轻度混淆，非加密）
+8. 将项目包打成内存 zip 归档并附加到每个启动器 `.exe` 尾部，同时从 `packages/` 中移除重复的项目包与项目自身 `.dist-info`
+9. 生成 **`.exe`** 启动器（`console.exe` / `gui.exe` 模板；若缺失则跳过）
 
 ## 跨平台打包
 
@@ -91,6 +94,8 @@ uvx uvpacker cache clear
 
 `uvpacker` **不会**为你交叉编译自带 C 扩展；此类项目请在 Windows 上打包。
 
+如果**项目自身包**包含 `.pyd` / `.dll` 这类原生二进制，当前的纯内存嵌入模式不支持，构建会直接失败。第三方原生依赖仍可保留在 `packages/` 中。
+
 ## 示例
 
 | 路径 | 说明 |
@@ -98,11 +103,12 @@ uvx uvpacker cache clear
 | `example/web-demo` | FastAPI + `importlib.resources` 静态资源 |
 | `example/qt-demo` | PySide6 桌面 GUI，经 GUI 启动器运行 |
 
-## 路线图（设想）
+## 说明
 
-- 隐藏或精简不应暴露给最终用户的 `packages/bin` 脚本
-- 更强的 wheel 校验与下载 **缓存**
-- 更清晰的错误提示与 **verbose** 诊断
+- 项目自身包从每个启动器 `.exe` 内部导入，不再从 `packages/` 读取。
+- `packages/` 仅保留运行时所需的第三方依赖。
+- 项目自身 `.dist-info` 元数据会在嵌入后从 `packages/` 清除。
+- 对于嵌入项目文件，支持通过 `importlib.resources` 访问资源。
 
 ## 许可
 

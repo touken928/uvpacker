@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import dataclasses
+import io
 import pathlib
+import re
 import shutil
 import subprocess
-import sys
+import zipfile
 from typing import Any, Mapping
 
 try:  # Python 3.11+
@@ -204,7 +206,7 @@ def _perform_pack(
     *,
     download: PackDownloadConfig,
 ) -> None:
-    step(1, 4, "Preparing embedded runtime...")
+    step(1, 5, "Preparing embedded runtime...")
     runtime_client.download_and_extract_embedded_runtime(
         python_version,
         layout.runtime,
@@ -212,29 +214,41 @@ def _perform_pack(
     )
     _patch_embedded_runtime_config(layout.runtime)
 
-    step(2, 4, "Installing project and dependencies into packages/...")
-    uv_client.install_project_with_uv(
+    step(2, 5, "Installing project and dependencies into packages/...")
+    project_roots = uv_client.install_project_with_uv(
         project_dir=project_dir,
         target_dir=layout.packages,
         target_python_version=python_version,
         download=download,
     )
+    _remove_non_runtime_script_shims(layout.packages)
+    package_roots = _resolve_project_roots(layout.packages, project_roots, cfg.name)
 
-    step(3, 4, "Stripping source .py files for the target project (bytecode-only payload)...")
+    step(
+        3,
+        5,
+        "Stripping source .py files for the target project (bytecode-only payload)...",
+    )
     # Use the same Python minor version as the embedded runtime when compiling
     # bytecode via `uv run`, so that .pyc files match the target environment.
     py_parts = python_version.split(".")
     target_minor = ".".join(py_parts[:2]) if len(py_parts) >= 2 else python_version
     _strip_source_to_pyc(
         app_dir=layout.packages,
-        project_name=cfg.name,
+        project_roots=package_roots,
         target_python_minor=target_minor,
     )
 
-    step(4, 4, "Generating launchers...")
+    step(4, 5, "Embedding the target project into launcher payloads...")
+    project_archive = _build_project_archive(layout.packages, package_roots)
+    _remove_project_roots(layout.packages, package_roots)
+    _remove_project_dist_info(layout.packages, cfg.name)
+
+    step(5, 5, "Generating launchers...")
     _create_exe_launchers(
         scripts=cfg.scripts,
         launchers_dir=layout.root,
+        archive=project_archive,
     )
     success("Done.")
 
@@ -263,9 +277,30 @@ def _patch_embedded_runtime_config(embedded_dir: pathlib.Path) -> None:
         pth.write_text(content, encoding="utf-8")
 
 
+def _resolve_project_roots(
+    app_dir: pathlib.Path,
+    discovered_roots: tuple[str, ...],
+    project_name: str,
+) -> tuple[str, ...]:
+    normalized = tuple(dict.fromkeys(discovered_roots))
+    if normalized:
+        return normalized
+
+    fallback = [project_name, project_name.replace("-", "_")]
+    existing: list[str] = []
+    for root in fallback:
+        if (
+            (app_dir / root).is_dir()
+            or (app_dir / f"{root}.py").is_file()
+            or (app_dir / f"{root}.pyc").is_file()
+        ):
+            existing.append(root)
+    return tuple(dict.fromkeys(existing))
+
+
 def _strip_source_to_pyc(
     app_dir: pathlib.Path,
-    project_name: str,
+    project_roots: tuple[str, ...],
     target_python_minor: str,
 ) -> None:
     """
@@ -276,13 +311,10 @@ def _strip_source_to_pyc(
     files for the target project, but does not make reverse engineering
     impossible.
     """
-    # Heuristic: prefer the normalized distribution name (hyphens -> underscores).
-    dist_name = project_name
-    candidates = {dist_name, dist_name.replace("-", "_")}
-
     target_dirs: list[pathlib.Path] = []
-    for entry in app_dir.iterdir():
-        if entry.is_dir() and entry.name in candidates:
+    for root in project_roots:
+        entry = app_dir / root
+        if entry.is_dir():
             target_dirs.append(entry)
 
     # Fallback: if we cannot identify a specific package directory, operate on
@@ -335,10 +367,155 @@ def _strip_source_to_pyc(
                 # Best-effort: if we cannot delete a file, continue.
                 continue
 
+    for root in project_roots:
+        module_py = app_dir / f"{root}.py"
+        if module_py.is_file():
+            compiled = app_dir / f"{root}.pyc"
+            if not compiled.is_file():
+                info(
+                    f"Compiling module {module_py.name!r} to .pyc using "
+                    f"Python {target_python_minor} via `uv run`...",
+                )
+                cmd = [
+                    "uv",
+                    "run",
+                    "--python",
+                    target_python_minor,
+                    "python",
+                    "-m",
+                    "py_compile",
+                    str(module_py),
+                ]
+                try:
+                    proc = subprocess.run(
+                        cmd,
+                        cwd=str(app_dir),
+                        check=False,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                except OSError as exc:
+                    raise BuildError(
+                        f"Failed to invoke 'uv' to compile module {module_py.name!r}: {exc}",
+                    ) from exc
+                if proc.returncode != 0:
+                    detail = (proc.stderr or proc.stdout or "").strip()
+                    raise BuildError(
+                        f"'uv run --python {target_python_minor} python -m py_compile' "
+                        f"failed for module {module_py.name!r}: {detail}",
+                    )
+            try:
+                module_py.unlink()
+            except OSError:
+                continue
+
+
+def _build_project_archive(
+    app_dir: pathlib.Path, project_roots: tuple[str, ...]
+) -> bytes:
+    if not project_roots:
+        raise BuildError(
+            "Could not determine which installed package roots belong to the project."
+        )
+
+    buffer = io.BytesIO()
+    seen = False
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for root in project_roots:
+            pkg_dir = app_dir / root
+            if pkg_dir.is_dir():
+                for file_path in sorted(
+                    path for path in pkg_dir.rglob("*") if path.is_file()
+                ):
+                    _validate_embeddable_file(root, file_path.relative_to(app_dir))
+                    archive.write(file_path, file_path.relative_to(app_dir).as_posix())
+                    seen = True
+                continue
+
+            for suffix in (".pyc", ".py"):
+                module_path = app_dir / f"{root}{suffix}"
+                if module_path.is_file():
+                    _validate_embeddable_file(root, module_path.relative_to(app_dir))
+                    archive.write(
+                        module_path, module_path.relative_to(app_dir).as_posix()
+                    )
+                    seen = True
+                    break
+
+    if not seen:
+        raise BuildError("Failed to collect any project files for launcher embedding.")
+    return buffer.getvalue()
+
+
+def _validate_embeddable_file(root: str, relative_path: pathlib.Path) -> None:
+    unsupported_suffixes = {".pyd", ".dll", ".so", ".dylib"}
+    if relative_path.suffix.lower() in unsupported_suffixes:
+        raise BuildError(
+            "The project package cannot be embedded purely in-memory because "
+            f"{relative_path.as_posix()!r} under root {root!r} is a native binary.",
+        )
+
+
+def _remove_project_roots(
+    app_dir: pathlib.Path, project_roots: tuple[str, ...]
+) -> None:
+    for root in project_roots:
+        pkg_dir = app_dir / root
+        if pkg_dir.is_dir():
+            shutil.rmtree(pkg_dir, ignore_errors=True)
+            continue
+
+        for suffix in (".pyc", ".py"):
+            module_path = app_dir / f"{root}{suffix}"
+            if module_path.is_file():
+                try:
+                    module_path.unlink()
+                except OSError:
+                    pass
+
+
+def _remove_project_dist_info(app_dir: pathlib.Path, project_name: str) -> None:
+    target = _normalize_distribution_name(project_name)
+    for dist_info in app_dir.glob("*.dist-info"):
+        metadata = dist_info / "METADATA"
+        if not metadata.is_file():
+            continue
+        try:
+            declared_name = _read_metadata_name(metadata)
+        except OSError:
+            continue
+        if declared_name is None:
+            continue
+        if _normalize_distribution_name(declared_name) == target:
+            shutil.rmtree(dist_info, ignore_errors=True)
+
+
+def _remove_non_runtime_script_shims(app_dir: pathlib.Path) -> None:
+    # `uv pip install --target` may leave host-style script shims under bin/.
+    # They are not used by the packed app, which launches through our own exe shims.
+    for name in ("bin", "Scripts"):
+        scripts_dir = app_dir / name
+        if scripts_dir.is_dir():
+            shutil.rmtree(scripts_dir, ignore_errors=True)
+
+
+def _read_metadata_name(metadata_path: pathlib.Path) -> str | None:
+    with metadata_path.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if line.startswith("Name:"):
+                return line.partition(":")[2].strip()
+    return None
+
+
+def _normalize_distribution_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
 
 def _create_exe_launchers(
     scripts: list[ScriptDefinition],
     launchers_dir: pathlib.Path,
+    archive: bytes,
 ) -> None:
     """
     Generate Windows `.exe` launchers backed by a small C shim.
@@ -360,6 +537,7 @@ def _create_exe_launchers(
             module=module,
             func=func or "main",
             gui=script.gui,
+            archive=archive,
         )
         if created is None:
             kind = "GUI" if script.gui else "console"

@@ -4,6 +4,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import zipfile
 from dataclasses import dataclass
 
 from ..domain.errors import BuildError
@@ -26,7 +27,7 @@ def install_project_with_uv(
     target_python_version: str,
     *,
     download: PackDownloadConfig = DEFAULT_DOWNLOAD_CONFIG,
-) -> None:
+) -> tuple[str, ...]:
     """
     Install a project into ``target_dir`` as a Windows amd64 application payload.
 
@@ -44,14 +45,20 @@ def install_project_with_uv(
     )
     with tempfile.TemporaryDirectory() as tmp:
         wheel_dir = pathlib.Path(tmp)
-        wheel_path = _build_project_wheel(request.project_dir, wheel_dir, download=request.download)
+        wheel_path = _build_project_wheel(
+            request.project_dir, wheel_dir, download=request.download
+        )
         _validate_built_wheel(wheel_path)
-        cmd = _build_install_command(request=request, wheel_dir=wheel_dir, wheel_path=wheel_path)
+        top_level_import_names = _discover_top_level_import_names(wheel_path)
+        cmd = _build_install_command(
+            request=request, wheel_dir=wheel_dir, wheel_path=wheel_path
+        )
 
         try:
             _run_command(cmd, cwd=request.project_dir)
         except BuildError as exc:
             raise BuildError(f"Dependency install failed. {exc}") from exc
+    return top_level_import_names
 
 
 def _build_project_wheel(
@@ -102,6 +109,39 @@ def _validate_built_wheel(wheel_path: pathlib.Path) -> None:
             "The built project wheel is not compatible with win_amd64: "
             f"{wheel_path.name}",
         )
+
+
+def _discover_top_level_import_names(wheel_path: pathlib.Path) -> tuple[str, ...]:
+    with zipfile.ZipFile(wheel_path) as wheel:
+        names = wheel.namelist()
+        try:
+            top_level = next(
+                name for name in names if name.endswith(".dist-info/top_level.txt")
+            )
+        except StopIteration:
+            top_level = None
+
+        if top_level is not None:
+            raw = wheel.read(top_level).decode("utf-8", errors="ignore")
+            discovered = tuple(
+                line.strip() for line in raw.splitlines() if line.strip()
+            )
+            if discovered:
+                return discovered
+
+        inferred: list[str] = []
+        seen: set[str] = set()
+        for name in names:
+            if name.endswith("/") or ".dist-info/" in name or ".data/" in name:
+                continue
+            root = pathlib.PurePosixPath(name).parts[0]
+            if root.endswith(".py"):
+                root = pathlib.PurePosixPath(root).stem
+            if not root.isidentifier() or root in seen:
+                continue
+            seen.add(root)
+            inferred.append(root)
+        return tuple(inferred)
 
 
 def _python_major_minor(version: str) -> str:

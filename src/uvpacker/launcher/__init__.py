@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 MAGIC = b"UVPKLAUN"
-FOOTER_STRUCT = struct.Struct("<8sII")
+PAYLOAD_VERSION = 1
+FOOTER_STRUCT = struct.Struct("<8sIII")
 
 TEMPLATE_CONSOLE = "console.exe"
 TEMPLATE_GUI = "gui.exe"
@@ -25,10 +26,10 @@ def get_template_exe(gui: bool) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def _make_payload(config: Mapping[str, Any]) -> bytes:
+def _make_payload(config: Mapping[str, Any], archive: bytes = b"") -> bytes:
     data = json.dumps(config, separators=(",", ":")).encode("utf-8")
-    footer = FOOTER_STRUCT.pack(MAGIC, len(data), 0)
-    return data + footer
+    footer = FOOTER_STRUCT.pack(MAGIC, len(data), len(archive), PAYLOAD_VERSION)
+    return archive + data + footer
 
 
 def build_launcher_for_script(
@@ -38,6 +39,7 @@ def build_launcher_for_script(
     func: str | None,
     *,
     gui: bool = False,
+    archive: bytes = b"",
 ) -> Path | None:
     """
     Build a Windows .exe launcher for a console or GUI script entry.
@@ -53,9 +55,8 @@ def build_launcher_for_script(
         "func": func or "main",
     }
     base = template.read_bytes()
-    payload = _make_payload(config)
+    payload = _make_payload(config, archive=archive)
 
     target = launchers_dir / f"{script_name}.exe"
     target.write_bytes(base + payload)
     return target
-

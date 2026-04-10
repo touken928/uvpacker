@@ -7,20 +7,25 @@ packed applications via small `console.exe` / `gui.exe` template shims instead o
 
 - `launcher.c` is a tiny Windows program that:
   - Locates its own executable path.
-  - Reads a JSON payload appended to the end of the EXE, followed by a fixed
-    16-byte footer (`"UVPKLAUN"`, payload size, reserved).
-  - Extracts the target `module` and `func` from the JSON payload.
+  - Reads an embedded project archive and JSON metadata appended to the end of the EXE, followed by a fixed
+    20-byte footer (`"UVPKLAUN"`, metadata size, archive size, version).
   - Locates the embedded runtime under `runtime\` next to the launcher
     (`python3.dll`, etc.).
-  - Loads `python3.dll`, resolves `Py_Main`, and runs:
-    `from <module> import <func> as _f; raise SystemExit(_f())`.
+  - Loads `python3.dll`, resolves `Py_Main`, installs a small in-memory importer, and runs the configured entrypoint from the appended project archive.
 - Two PE templates are built from the same source:
   - **`console.exe`** — console subsystem (for `[project.scripts]`).
   - **`gui.exe`** — Windows subsystem, no console window (for
     `[project.gui-scripts]`).
 - The Python package (`uvpacker.launcher`) locates the bundled templates and
-  appends per-script JSON + footer to produce `<script>.exe` in the packed
+  appends per-script archive + JSON + footer to produce `<script>.exe` in the packed
   output directory.
+
+### Runtime model
+
+- The target project's own pure-Python package is embedded into each launcher `.exe`.
+- Third-party dependencies stay in `packages/` and are exposed through the embedded runtime's `._pth` / `.pth`.
+- `importlib.resources` access for embedded project files is supported by the launcher's in-memory loader.
+- Native binaries inside the project package itself (for example `.pyd`) are not supported by this in-memory embedding model.
 
 ### Building with mingw-w64 (Windows or cross-compile)
 

@@ -20,7 +20,8 @@
 `uvpacker` builds a directory you can zip or copy as-is. It contains:
 
 - the official **CPython Embedded Runtime** for Windows (64-bit)
-- your project and dependencies installed for **`win_amd64`**
+- your **third-party dependencies** installed for **`win_amd64`**
+- your **project package embedded into each generated launcher `.exe`**
 - launchers derived from **`[project.scripts]`** (console) and **`[project.gui-scripts]`** (no console window), as `.exe` when templates are available
 
 The goal is to run on machines **without a system Python**, while keeping the build **declarative** (standard `pyproject.toml`) and **predictable**.
@@ -47,11 +48,11 @@ Default path: `dist/<project-name>/`
 ```text
 dist/<project-name>/
   runtime/          # Windows embedded CPython
-  packages/         # Your wheel + dependencies (win_amd64)
+  packages/         # Third-party dependencies only (win_amd64)
   <script>.exe      # Console vs GUI template from scripts / gui-scripts
 ```
 
-Launchers use `runtime\python.exe` and patch the embedded `._pth` / `.pth` file so **`..\packages`** is on `sys.path` — no dependency on a global Python install.
+Launchers load `runtime\python3.dll`, patch the embedded `._pth` / `.pth` file so **`..\packages`** is on `sys.path`, and import your project package from an archive appended to the end of the `.exe` — no dependency on a global Python install.
 
 ## Installation & usage
 
@@ -78,9 +79,11 @@ uvx uvpacker cache clear
 2. Resolve Python version and obtain `python-<version>-embed-amd64.zip` (downloaded once, then cached under `~/.cache/uvpacker/embed`, or `$XDG_CACHE_HOME/uvpacker/embed` if set)
 3. Build a wheel for the target project
 4. `uv pip install` into `packages/` with **`--python-platform x86_64-pc-windows-msvc`**
-5. Patch embedded runtime `_pth` to include `..\packages`
-6. For **your** package tree: compile `.py` → `.pyc` with the target minor via `uv run`, then remove `.py` (light obfuscation; not encryption)
-7. Generate **`.exe`** launchers (`console.exe` / `gui.exe` templates, or skip if missing)
+5. Remove host-style script shims from `packages/bin` / `packages/Scripts`
+6. Patch embedded runtime `_pth` to include `..\packages`
+7. For **your** package tree: compile `.py` → `.pyc` with the target minor via `uv run`, then remove `.py` (light obfuscation; not encryption)
+8. Bundle your project package into an in-memory zip archive, append it to each generated launcher `.exe`, and remove the duplicated project package / project `.dist-info` from `packages/`
+9. Generate **`.exe`** launchers (`console.exe` / `gui.exe` templates, or skip if missing)
 
 ## Cross-platform builds
 
@@ -91,6 +94,8 @@ Dependency resolution targets **`win_amd64`**, so you can pack from a non-Window
 
 `uvpacker` does **not** cross-compile your own C extensions; use Windows for those projects.
 
+If your **project package itself** contains native binaries such as `.pyd` / `.dll`, the current in-memory embedding mode is not supported and the build will fail. Third-party native dependencies can still remain in `packages/`.
+
 ## Examples
 
 | Path | What it shows |
@@ -98,11 +103,12 @@ Dependency resolution targets **`win_amd64`**, so you can pack from a non-Window
 | `example/web-demo` | FastAPI + `importlib.resources` for static assets |
 | `example/qt-demo` | PySide6 GUI via generated launcher |
 
-## Roadmap (ideas)
+## Notes
 
-- Hide or trim `packages/bin` shims that should not be end-user facing
-- Stronger wheel checks and download **caching**
-- Clearer errors and **verbose** diagnostics
+- Your project package is imported from inside each launcher `.exe`, not from `packages/`.
+- `packages/` is reserved for third-party dependencies needed at runtime.
+- The project's own `.dist-info` metadata is removed from `packages/` after embedding.
+- Resource access via `importlib.resources` is supported for embedded project files.
 
 ## License
 
