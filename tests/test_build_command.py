@@ -17,7 +17,9 @@ def test_build_command_uses_default_source(
     out = tmp_path / "out"
     captured: dict[str, object] = {}
 
-    def fake_pack_project(*, project_dir: Path, output_dir: Path | None, download: object) -> None:
+    def fake_pack_project(
+        *, project_dir: Path, output_dir: Path | None, download: object
+    ) -> None:
         captured["project_dir"] = project_dir
         captured["output_dir"] = output_dir
         captured["download"] = download

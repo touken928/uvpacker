@@ -48,7 +48,9 @@ def resolve_latest_embed_for_minor(
             f"No patch releases found at embed index {index_url!r} for minor {minor!r}.",
         )
 
-    for major, minor_part, patch in sorted(candidates, key=lambda t: t[2], reverse=True):
+    for major, minor_part, patch in sorted(
+        candidates, key=lambda t: t[2], reverse=True
+    ):
         version = f"{major}.{minor_part}.{patch}"
         url = download.embed_zip_url(version)
         if _head_exists(url):
