@@ -8,6 +8,12 @@ from `pyproject.toml` via `[project.scripts]`.
 
 from __future__ import annotations
 
+from importlib.metadata import version
+
+# Set before importing submodules that transitively import `uvpacker.launcher`,
+# which reads `__version__` for embedded exe metadata.
+__version__ = version("uvpacker")
+
 from .app.cli import main
 
-__all__ = ["main"]
+__all__ = ["main", "__version__"]

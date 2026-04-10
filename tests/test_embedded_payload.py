@@ -9,7 +9,9 @@ import pytest
 
 from uvpacker.infra import uv_client
 from uvpacker.domain.errors import BuildError
-from uvpacker.launcher import FOOTER_STRUCT, MAGIC, PAYLOAD_VERSION, _make_payload
+import uvpacker
+
+from uvpacker.launcher import MAGIC, TRAILER_STRUCT, _make_payload
 from uvpacker.services import packer
 
 
@@ -17,16 +19,21 @@ def test_make_payload_appends_archive_then_metadata_then_footer() -> None:
     archive = b"PK\x03\x04payload"
     payload = _make_payload({"module": "demo.main", "func": "main"}, archive=archive)
 
-    footer = payload[-FOOTER_STRUCT.size :]
-    magic, metadata_size, archive_size, version = FOOTER_STRUCT.unpack(footer)
+    trailer = payload[-TRAILER_STRUCT.size :]
+    json_len, magic = TRAILER_STRUCT.unpack(trailer)
 
     assert magic == MAGIC
-    assert archive_size == len(archive)
-    assert version == PAYLOAD_VERSION
-    assert payload[:archive_size] == archive
+    assert payload[: len(archive)] == archive
 
-    metadata = json.loads(payload[archive_size : archive_size + metadata_size].decode("utf-8"))
-    assert metadata == {"module": "demo.main", "func": "main"}
+    meta_bytes = payload[len(archive) : len(archive) + json_len]
+    metadata = json.loads(meta_bytes.decode("utf-8"))
+    assert metadata == {
+        "uvpacker": uvpacker.__version__,
+        "archive_size": len(archive),
+        "module": "demo.main",
+        "func": "main",
+    }
+    assert len(payload) == len(archive) + json_len + TRAILER_STRUCT.size
 
 
 def test_discover_top_level_import_names_prefers_top_level_txt(tmp_path: Path) -> None:
@@ -35,7 +42,10 @@ def test_discover_top_level_import_names_prefers_top_level_txt(tmp_path: Path) -
         wheel.writestr("demo-0.1.0.dist-info/top_level.txt", "demo\nhelper_mod\n")
         wheel.writestr("ignored.py", "print('x')\n")
 
-    assert uv_client._discover_top_level_import_names(wheel_path) == ("demo", "helper_mod")
+    assert uv_client._discover_top_level_import_names(wheel_path) == (
+        "demo",
+        "helper_mod",
+    )
 
 
 def test_build_project_archive_and_remove_roots(tmp_path: Path) -> None:
@@ -79,8 +89,12 @@ def test_remove_project_dist_info_only_removes_target_project(tmp_path: Path) ->
     dep = packages / "requests-2.32.0.dist-info"
     own.mkdir(parents=True)
     dep.mkdir(parents=True)
-    (own / "METADATA").write_text("Metadata-Version: 2.1\nName: demo-app\n", encoding="utf-8")
-    (dep / "METADATA").write_text("Metadata-Version: 2.1\nName: requests\n", encoding="utf-8")
+    (own / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: demo-app\n", encoding="utf-8"
+    )
+    (dep / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: requests\n", encoding="utf-8"
+    )
 
     packer._remove_project_dist_info(packages, "demo_app")
 
@@ -88,7 +102,9 @@ def test_remove_project_dist_info_only_removes_target_project(tmp_path: Path) ->
     assert dep.exists()
 
 
-def test_remove_non_runtime_script_shims_removes_bin_and_scripts(tmp_path: Path) -> None:
+def test_remove_non_runtime_script_shims_removes_bin_and_scripts(
+    tmp_path: Path,
+) -> None:
     packages = tmp_path / "packages"
     (packages / "bin").mkdir(parents=True)
     (packages / "Scripts").mkdir(parents=True)
