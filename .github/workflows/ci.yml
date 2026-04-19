@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pack-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync project
+        run: uv sync --all-groups
+
+      - name: Cache embedded Python zips
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uvpacker/embed
+          key: uvpacker-embed-linux-${{ hashFiles('example/web-demo/pyproject.toml', 'example/qt-demo/pyproject.toml') }}
+
+      - name: Unit tests
+        run: uv run pytest
+
+      - name: Pack example projects (Windows targets)
+        run: |
+          set -eux
+          mkdir -p packed
+          uv run uvpacker build example/web-demo -o packed/web-demo
+          uv run uvpacker build example/qt-demo -o packed/qt-demo
+
+      - name: Upload packed examples
+        uses: actions/upload-artifact@v4
+        with:
+          name: packed-examples
+          path: packed/
+          if-no-files-found: error
+
+  smoke-windows:
+    needs: pack-linux
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: packed-examples
+          path: packed
+
+      - name: Smoke — web-demo API
+        shell: pwsh
+        working-directory: packed/web-demo
+        run: |
+          $ErrorActionPreference = "Stop"
+          $proc = Start-Process -FilePath ".\web-demo.exe" -PassThru -WindowStyle Minimized
+          try {
+            $deadline = (Get-Date).AddSeconds(90)
+            $ok = $false
+            while ((Get-Date) -lt $deadline) {
+              if ($proc.HasExited) {
+                throw "web-demo.exe exited before /api/hello was ready (exit $($proc.ExitCode))."
+              }
+              try {
+                $r = Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/hello" -UseBasicParsing -TimeoutSec 3
+                if ($r.StatusCode -eq 200 -and $r.Content -match "Hello") { $ok = $true; break }
+              } catch {
+                Start-Sleep -Milliseconds 400
+              }
+            }
+            if (-not $ok) { throw "web-demo: API /api/hello did not become ready in time." }
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Smoke — qt-demo launcher
+        shell: pwsh
+        working-directory: packed/qt-demo
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $ErrorActionPreference = "Stop"
+          $p = Start-Process -FilePath ".\qt-demo.exe" -PassThru
+          Start-Sleep -Seconds 5
+          if ($p.HasExited) {
+            if ($p.ExitCode -ne 0) { throw "qt-demo exited early with code $($p.ExitCode)." }
+          } else {
+            Stop-Process -Id $p.Id -Force
+          }
