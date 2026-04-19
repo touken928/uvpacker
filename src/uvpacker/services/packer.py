@@ -349,7 +349,7 @@ def _compile_directory_tree_to_pyc(
         cwd=pkg_dir,
         python_args=["-m", "compileall", "-b", str(pkg_dir)],
         failure_message=(
-            f"'uv run --python {target_python_minor} python -m compileall' "
+            f"'uv run --no-project --python {target_python_minor} python -m compileall' "
             f"failed for {pkg_dir.name!r}"
         ),
     )
@@ -373,7 +373,7 @@ def _compile_module_to_pyc(
         cwd=app_dir,
         python_args=["-m", "py_compile", str(module_py)],
         failure_message=(
-            f"'uv run --python {target_python_minor} python -m py_compile' "
+            f"'uv run --no-project --python {target_python_minor} python -m py_compile' "
             f"failed for module {module_py.name!r}"
         ),
     )
@@ -386,7 +386,17 @@ def _run_uv_python(
     python_args: list[str],
     failure_message: str,
 ) -> None:
-    cmd = ["uv", "run", "--python", target_python_minor, "python", *python_args]
+    # Avoid the packer's own `requires-python` (e.g. 3.12) when the target
+    # project uses a different minor (e.g. 3.10) for bytecode compilation.
+    cmd = [
+        "uv",
+        "run",
+        "--no-project",
+        "--python",
+        target_python_minor,
+        "python",
+        *python_args,
+    ]
     try:
         proc = subprocess.run(
             cmd,
