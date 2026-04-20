@@ -102,6 +102,7 @@ If your **project package itself** contains native binaries such as `.pyd` / `.d
 |------|----------------|
 | `example/web-demo` | FastAPI + `importlib.resources` for static assets |
 | `example/qt-demo` | PySide6 GUI via generated launcher |
+| `example/cli-demo` | Small `argparse` console tool for **Python 3.14** (`hello` / `version` / `cwd` subcommands) |
 
 ## Notes
 

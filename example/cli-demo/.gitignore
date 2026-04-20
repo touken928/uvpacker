@@ -1,0 +1,8 @@
+# 仅跟踪 src/ 与 pyproject.toml；其余（如 uv.lock、本地 venv）不纳入版本库
+*
+!.gitignore
+!pyproject.toml
+!src/
+!src/**
+src/**/__pycache__/
+*.py[cod]

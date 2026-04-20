@@ -102,6 +102,7 @@ uvx uvpacker cache clear
 |------|------|
 | `example/web-demo` | FastAPI + `importlib.resources` 静态资源 |
 | `example/qt-demo` | PySide6 桌面 GUI，经 GUI 启动器运行 |
+| `example/cli-demo` | 基于 `argparse` 的简单命令行示例，目标 **Python 3.14**（`hello` / `version` / `cwd` 子命令） |
 
 ## 说明
 

@@ -26,7 +26,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uvpacker/embed
-          key: uvpacker-embed-linux-${{ hashFiles('example/web-demo/pyproject.toml', 'example/qt-demo/pyproject.toml') }}
+          key: uvpacker-embed-linux-${{ hashFiles('example/web-demo/pyproject.toml', 'example/qt-demo/pyproject.toml', 'example/cli-demo/pyproject.toml') }}
 
       - name: Unit tests
         run: uv run pytest
@@ -37,6 +37,7 @@ jobs:
           mkdir -p packed
           uv run uvpacker build example/web-demo -o packed/web-demo
           uv run uvpacker build example/qt-demo -o packed/qt-demo
+          uv run uvpacker build example/cli-demo -o packed/cli-demo
 
       - name: Upload packed examples
         uses: actions/upload-artifact@v4
@@ -93,4 +94,24 @@ jobs:
             if ($p.ExitCode -ne 0) { throw "qt-demo exited early with code $($p.ExitCode)." }
           } else {
             Stop-Process -Id $p.Id -Force
+          }
+
+      - name: Smoke — cli-demo
+        shell: pwsh
+        working-directory: packed/cli-demo
+        run: |
+          $ErrorActionPreference = "Stop"
+          $hello = (& .\cli-demo.exe hello --name uvpacker 2>&1 | Out-String).Trim()
+          if ($hello -notmatch "Hello, uvpacker") {
+            throw "cli-demo hello: unexpected output: $hello"
+          }
+          $ver = (& .\cli-demo.exe version 2>&1 | Out-String).Trim()
+          if ($ver -notmatch "^cli-demo ") {
+            throw "cli-demo version: unexpected output: $ver"
+          }
+          $wd = (& .\cli-demo.exe cwd 2>&1 | Out-String).Trim()
+          if (-not [string]::IsNullOrWhiteSpace($wd) -and (Test-Path -LiteralPath $wd)) {
+            Write-Host "cli-demo cwd ok: $wd"
+          } else {
+            throw "cli-demo cwd: unexpected output (not a valid path?): $wd"
           }
