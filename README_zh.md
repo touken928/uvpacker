@@ -73,17 +73,13 @@ uvx uvpacker cache clear
 
 > **说明：** 已在 **`uv` 0.11.x** 下测试；新版本 `uv` 若变更 CLI，请反馈或固定版本。
 
-## 打包流程
+## 示例
 
-1. 读取并校验 `pyproject.toml`（`scripts`、`gui-scripts`、`build-system`、`requires-python`）
-2. 解析 Python 版本并获取 `python-<版本>-embed-amd64.zip`（首次下载后缓存于 `~/.cache/uvpacker/embed`，若设置了 `XDG_CACHE_HOME` 则为 `$XDG_CACHE_HOME/uvpacker/embed`）
-3. 为目标项目构建 wheel
-4. 使用 **`--python-platform x86_64-pc-windows-msvc`** 执行 `uv pip install` 到 `packages/`
-5. 删除 `packages/bin` / `packages/Scripts` 中宿主平台风格的脚本 shim
-6. 修改嵌入式运行时 `_pth`，加入 `..\packages`
-7. 对**你的**项目包：用目标次版本号通过 `uv run` 将 `.py` 编译为 `.pyc`，再删除 `.py`（轻度混淆，非加密）
-8. 将项目包打成内存 zip 归档并附加到每个启动器 `.exe` 尾部，同时从 `packages/` 中移除重复的项目包与项目自身 `.dist-info`
-9. 生成 **`.exe`** 启动器（`console.exe` / `gui.exe` 模板；若缺失则跳过）
+| 路径 | 说明 |
+|------|------|
+| `example/web-demo` | FastAPI + `importlib.resources` 静态资源 |
+| `example/qt-demo` | PySide6 桌面 GUI，经 GUI 启动器运行 |
+| `example/cli-demo` | 基于 `argparse` 的简单命令行示例，目标 **Python 3.14**（`hello` / `version` / `cwd` 子命令） |
 
 ## 跨平台打包
 
@@ -96,20 +92,32 @@ uvx uvpacker cache clear
 
 如果**项目自身包**包含 `.pyd` / `.dll` 这类原生二进制，当前的纯内存嵌入模式不支持，构建会直接失败。第三方原生依赖仍可保留在 `packages/` 中。
 
-## 示例
+## 打包流程
 
-| 路径 | 说明 |
-|------|------|
-| `example/web-demo` | FastAPI + `importlib.resources` 静态资源 |
-| `example/qt-demo` | PySide6 桌面 GUI，经 GUI 启动器运行 |
-| `example/cli-demo` | 基于 `argparse` 的简单命令行示例，目标 **Python 3.14**（`hello` / `version` / `cwd` 子命令） |
+1. 读取并校验 `pyproject.toml`（`scripts`、`gui-scripts`、`build-system`、`requires-python`）
+2. 解析 Python 版本并获取 `python-<版本>-embed-amd64.zip`（首次下载后缓存于 `~/.cache/uvpacker/embed`，若设置了 `XDG_CACHE_HOME` 则为 `$XDG_CACHE_HOME/uvpacker/embed`）
+3. 为目标项目构建 wheel
+4. 使用 **`--python-platform x86_64-pc-windows-msvc`** 执行 `uv pip install` 到 `packages/`
+5. 删除 `packages/bin` / `packages/Scripts` 中宿主平台风格的脚本 shim
+6. 修改嵌入式运行时 `_pth`，加入 `..\packages`
+7. 对**你的**项目包：用目标次版本号通过 `uv run` 将 `.py` 编译为 `.pyc`，再删除 `.py`（轻度混淆，非加密）
+8. 将项目包打成内存 zip 归档并附加到每个启动器 `.exe` 尾部，同时从 `packages/` 中移除重复的项目包与项目自身 `.dist-info`
+9. 生成 **`.exe`** 启动器（`console.exe` / `gui.exe` 模板；若缺失则跳过）
+
+## 资源嵌入
+
+运行时遵循 **wheel 的安装布局**：第三方依赖在 `packages/`，**你的**项目从 `.exe` 内嵌归档导入，通常**没有**开发时的 `src/...` 目录树。
+
+凡是用 [`importlib.resources.files`](https://docs.python.org/3/library/importlib.resources.html#importlib.resources.files) 读的资源都要打进 wheel，并放在**可导入的子包路径**下（例如 `files("myproject.static")` 对应 wheel 里的 `myproject/static/`）。第一个参数用**带点号的真实包名**；不要用相对 exe 的路径、裸名猜磁盘位置，或 `Path(__file__).parent / ...`。
+
+`files()` 常返回 **`Traversable`** 而非完整 `pathlib.Path`（嵌入场景尤甚）：不要用 `path / "x"`、不要用多参数 `joinpath`，应写成 `root.joinpath("a").joinpath("b")` 这类单参数链式。
 
 ## 说明
 
 - 项目自身包从每个启动器 `.exe` 内部导入，不再从 `packages/` 读取。
 - `packages/` 仅保留运行时所需的第三方依赖。
 - 项目自身 `.dist-info` 元数据会在嵌入后从 `packages/` 清除。
-- 对于嵌入项目文件，支持通过 `importlib.resources` 访问资源。
+- 项目内资源请用 `importlib.resources`，写法见上文 **资源嵌入**。
 
 ## 许可
 

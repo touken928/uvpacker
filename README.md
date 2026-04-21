@@ -73,17 +73,13 @@ uvx uvpacker cache clear
 
 > **Note:** Tested with **`uv` 0.11.x**. Newer `uv` releases may change CLI behavior; report or pin versions if something breaks.
 
-## Packing pipeline
+## Examples
 
-1. Read and validate `pyproject.toml` (`scripts`, `gui-scripts`, `build-system`, `requires-python`)
-2. Resolve Python version and obtain `python-<version>-embed-amd64.zip` (downloaded once, then cached under `~/.cache/uvpacker/embed`, or `$XDG_CACHE_HOME/uvpacker/embed` if set)
-3. Build a wheel for the target project
-4. `uv pip install` into `packages/` with **`--python-platform x86_64-pc-windows-msvc`**
-5. Remove host-style script shims from `packages/bin` / `packages/Scripts`
-6. Patch embedded runtime `_pth` to include `..\packages`
-7. For **your** package tree: compile `.py` → `.pyc` with the target minor via `uv run`, then remove `.py` (light obfuscation; not encryption)
-8. Bundle your project package into an in-memory zip archive, append it to each generated launcher `.exe`, and remove the duplicated project package / project `.dist-info` from `packages/`
-9. Generate **`.exe`** launchers (`console.exe` / `gui.exe` templates, or skip if missing)
+| Path | What it shows |
+|------|----------------|
+| `example/web-demo` | FastAPI + `importlib.resources` for static assets |
+| `example/qt-demo` | PySide6 GUI via generated launcher |
+| `example/cli-demo` | Small `argparse` console tool for **Python 3.14** (`hello` / `version` / `cwd` subcommands) |
 
 ## Cross-platform builds
 
@@ -96,20 +92,32 @@ Dependency resolution targets **`win_amd64`**, so you can pack from a non-Window
 
 If your **project package itself** contains native binaries such as `.pyd` / `.dll`, the current in-memory embedding mode is not supported and the build will fail. Third-party native dependencies can still remain in `packages/`.
 
-## Examples
+## Packing pipeline
 
-| Path | What it shows |
-|------|----------------|
-| `example/web-demo` | FastAPI + `importlib.resources` for static assets |
-| `example/qt-demo` | PySide6 GUI via generated launcher |
-| `example/cli-demo` | Small `argparse` console tool for **Python 3.14** (`hello` / `version` / `cwd` subcommands) |
+1. Read and validate `pyproject.toml` (`scripts`, `gui-scripts`, `build-system`, `requires-python`)
+2. Resolve Python version and obtain `python-<version>-embed-amd64.zip` (downloaded once, then cached under `~/.cache/uvpacker/embed`, or `$XDG_CACHE_HOME/uvpacker/embed` if set)
+3. Build a wheel for the target project
+4. `uv pip install` into `packages/` with **`--python-platform x86_64-pc-windows-msvc`**
+5. Remove host-style script shims from `packages/bin` / `packages/Scripts`
+6. Patch embedded runtime `_pth` to include `..\packages`
+7. For **your** package tree: compile `.py` → `.pyc` with the target minor via `uv run`, then remove `.py` (light obfuscation; not encryption)
+8. Bundle your project package into an in-memory zip archive, append it to each generated launcher `.exe`, and remove the duplicated project package / project `.dist-info` from `packages/`
+9. Generate **`.exe`** launchers (`console.exe` / `gui.exe` templates, or skip if missing)
+
+## Resource embedding
+
+Runtime follows your **wheel’s install layout**: `uvpacker` puts third-party deps in `packages/` and imports **your** package from an archive embedded in each `.exe`, so you normally **do not** have a dev tree like `src/...` beside the executable.
+
+Ship every asset you open with [`importlib.resources.files`](https://docs.python.org/3/library/importlib.resources.html#importlib.resources.files) **inside importable subpackages** (e.g. `files("myproject.static")` for files under `myproject/static/` in the wheel). Pass the **real dotted package name**; do not use `.exe`-relative paths, bare name guesswork, or `Path(__file__).parent / ...`.
+
+`files()` often returns a **`Traversable`**, not a full `pathlib.Path`—especially under embedding. Avoid `path / "x"` and multi-arg `joinpath`; chain instead: `root.joinpath("a").joinpath("b")`.
 
 ## Notes
 
 - Your project package is imported from inside each launcher `.exe`, not from `packages/`.
 - `packages/` is reserved for third-party dependencies needed at runtime.
 - The project's own `.dist-info` metadata is removed from `packages/` after embedding.
-- Resource access via `importlib.resources` is supported for embedded project files.
+- Bundled project files: use `importlib.resources` as described under **Resource embedding**.
 
 ## License
 
