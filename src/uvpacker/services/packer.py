@@ -300,8 +300,7 @@ def _warn_missing_package_inits(
             if (path / "__init__.py").is_file():
                 continue
             has_direct_py = any(
-                child.is_file() and child.suffix == ".py"
-                for child in path.iterdir()
+                child.is_file() and child.suffix == ".py" for child in path.iterdir()
             )
             if not has_direct_py:
                 continue
