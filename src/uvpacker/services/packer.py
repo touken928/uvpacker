@@ -18,7 +18,7 @@ from .. import launcher as exe_launcher
 from ..domain.errors import BuildError, ConfigError
 from ..domain.sources import DEFAULT_DOWNLOAD_CONFIG, PackDownloadConfig
 from ..infra import runtime_client, uv_client
-from ..view.ui import info, kv, step, success
+from ..view.ui import info, kv, step, success, warn
 
 
 @dataclasses.dataclass(frozen=True)
@@ -223,6 +223,7 @@ def _perform_pack(
     )
     _remove_non_runtime_script_shims(layout.packages)
     package_roots = _resolve_project_roots(layout.packages, project_roots, cfg.name)
+    _warn_missing_package_inits(layout.packages, package_roots)
 
     step(
         3,
@@ -277,6 +278,38 @@ def _patch_embedded_runtime_config(embedded_dir: pathlib.Path) -> None:
     if rel_app not in content:
         content = content.rstrip() + "\n" + rel_app + "\n"
         pth.write_text(content, encoding="utf-8")
+
+
+def _warn_missing_package_inits(
+    app_dir: pathlib.Path, project_roots: tuple[str, ...]
+) -> None:
+    """
+    Emit a warning when a directory holds Python modules but has no ``__init__.py``.
+
+    Such layouts rely on implicit/namespace packages (PEP 420); shipping a
+    bytecode-only tree is safer with explicit ``__init__.py`` files for normal
+    packages.
+    """
+    for root in project_roots:
+        pkg_dir = app_dir / root
+        if not pkg_dir.is_dir():
+            continue
+        candidates = [pkg_dir]
+        candidates.extend(p for p in pkg_dir.rglob("*") if p.is_dir())
+        for path in sorted(candidates, key=lambda p: str(p)):
+            if (path / "__init__.py").is_file():
+                continue
+            has_direct_py = any(
+                child.is_file() and child.suffix == ".py"
+                for child in path.iterdir()
+            )
+            if not has_direct_py:
+                continue
+            rel = path.relative_to(app_dir).as_posix()
+            warn(
+                f"Package directory {rel!r} contains .py files but no __init__.py; "
+                "add __init__.py if this should be a regular package.",
+            )
 
 
 def _resolve_project_roots(
