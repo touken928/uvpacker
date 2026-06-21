@@ -35,3 +35,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# OpenCode deepwork state
+.slim/deepwork/

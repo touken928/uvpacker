@@ -1,3 +1,14 @@
+"""
+Tests for packer-related helpers, targeting the extracted seam modules directly.
+
+* ``services.project_config`` — TOML loading, path resolution, download logging
+* ``services.package_tree`` — installed-packages filesystem operations
+* ``services.payload_archive`` — zip construction and launcher assembly
+* ``domain.rules`` — validation functions
+* ``services.packer`` — only the orchestration spine (``_prepare_layout``,
+  ``_patch_embedded_runtime_config``) and re-exported model types
+"""
+
 from __future__ import annotations
 
 import pathlib
@@ -6,7 +17,24 @@ from pathlib import Path
 import pytest
 
 from uvpacker.domain.errors import BuildError, ConfigError
+from uvpacker.domain.models import ProjectConfig, ScriptDefinition
+from uvpacker.domain.rules import validate_embeddable_file, validate_project_config
 from uvpacker.services import packer
+from uvpacker.services.package_tree import (
+    existing_project_dirs,
+    remove_non_runtime_script_shims,
+    resolve_project_roots,
+)
+from uvpacker.services.payload_archive import (
+    _normalize_distribution_name,
+    _read_metadata_name,
+    _remove_project_dist_info,
+)
+from uvpacker.services.project_config import (
+    load_project_config,
+    require_project_dir,
+    resolve_output_dir,
+)
 
 
 class TestRequireProjectDir:
@@ -14,24 +42,24 @@ class TestRequireProjectDir:
         proj = tmp_path / "proj"
         proj.mkdir()
         (proj / "pyproject.toml").write_text("[project]\nname='test'\n")
-        result = packer._require_project_dir(proj)
+        result = require_project_dir(proj)
         assert result == proj / "pyproject.toml"
 
     def test_missing_directory_raises(self, tmp_path: Path) -> None:
         with pytest.raises(ConfigError, match="does not exist"):
-            packer._require_project_dir(tmp_path / "no_such_dir")
+            require_project_dir(tmp_path / "no_such_dir")
 
     def test_missing_pyproject_toml_raises(self, tmp_path: Path) -> None:
         proj = tmp_path / "proj"
         proj.mkdir()
         with pytest.raises(ConfigError, match="No pyproject.toml found"):
-            packer._require_project_dir(proj)
+            require_project_dir(proj)
 
     def test_file_not_dir_raises(self, tmp_path: Path) -> None:
         f = tmp_path / "file.txt"
         f.write_text("hello")
         with pytest.raises(ConfigError, match="does not exist"):
-            packer._require_project_dir(f)
+            require_project_dir(f)
 
 
 class TestLoadProjectConfig:
@@ -43,7 +71,7 @@ class TestLoadProjectConfig:
             "[build-system]\nrequires = [\"uv_build\"]\n"
             'build-backend = "uv_build"\n'
         )
-        cfg = packer._load_project_config(pyproject)
+        cfg = load_project_config(pyproject)
         assert cfg.name == "demo"
         assert cfg.requires_python == "==3.12.*"
         assert len(cfg.scripts) == 1
@@ -62,7 +90,7 @@ class TestLoadProjectConfig:
             "[build-system]\nrequires = [\"uv_build\"]\n"
             'build-backend = "uv_build"\n'
         )
-        cfg = packer._load_project_config(pyproject)
+        cfg = load_project_config(pyproject)
         assert len(cfg.scripts) == 2
         assert cfg.scripts[0].name == "cli"
         assert cfg.scripts[0].gui is False
@@ -78,7 +106,7 @@ class TestLoadProjectConfig:
             'build-backend = "uv_build"\n'
         )
         with pytest.raises(ConfigError, match="project.name"):
-            packer._load_project_config(pyproject)
+            load_project_config(pyproject)
 
     def test_missing_requires_python_yields_none(self, tmp_path: Path) -> None:
         pyproject = tmp_path / "pyproject.toml"
@@ -88,7 +116,7 @@ class TestLoadProjectConfig:
             "[build-system]\nrequires = [\"uv_build\"]\n"
             'build-backend = "uv_build"\n'
         )
-        cfg = packer._load_project_config(pyproject)
+        cfg = load_project_config(pyproject)
         assert cfg.requires_python is None
 
     def test_empty_scripts_returns_empty_list(self, tmp_path: Path) -> None:
@@ -98,7 +126,7 @@ class TestLoadProjectConfig:
             "[build-system]\nrequires = [\"uv_build\"]\n"
             'build-backend = "uv_build"\n'
         )
-        cfg = packer._load_project_config(pyproject)
+        cfg = load_project_config(pyproject)
         assert cfg.scripts == []
 
     def test_missing_build_system_returns_empty_dict(self, tmp_path: Path) -> None:
@@ -107,7 +135,7 @@ class TestLoadProjectConfig:
             '[project]\nname = "demo"\nrequires-python = "==3.12.*"\n'
             "[project.scripts]\ndemo = \"demo.main:main\"\n"
         )
-        cfg = packer._load_project_config(pyproject)
+        cfg = load_project_config(pyproject)
         assert cfg.build_system == {}
 
     def test_script_without_module_returns_empty_function(self, tmp_path: Path) -> None:
@@ -118,8 +146,7 @@ class TestLoadProjectConfig:
             "[build-system]\nrequires = [\"uv_build\"]\n"
             'build-backend = "uv_build"\n'
         )
-        cfg = packer._load_project_config(pyproject)
-        # target string has no colon, so partition gives module="demo.entry", func=""
+        cfg = load_project_config(pyproject)
         assert cfg.scripts[0].target == "demo.entry"
 
 
@@ -128,15 +155,15 @@ class TestValidateProjectConfig:
         self,
         *,
         name: str = "demo",
-        requires_python: str = "==3.12.*",
-        scripts: list[packer.ScriptDefinition] | None = None,
+        requires_python: str | None = "==3.12.*",
+        scripts: list[ScriptDefinition] | None = None,
         build_system: dict | None = None,
-    ) -> packer.ProjectConfig:
+    ) -> ProjectConfig:
         if scripts is None:
-            scripts = [packer.ScriptDefinition(name="demo", target="demo.main:main")]
+            scripts = [ScriptDefinition(name="demo", target="demo.main:main")]
         if build_system is None:
             build_system = {"requires": ["uv_build"], "build-backend": "uv_build"}
-        return packer.ProjectConfig(
+        return ProjectConfig(
             root=pathlib.Path("/fake"),
             name=name,
             requires_python=requires_python,
@@ -146,64 +173,163 @@ class TestValidateProjectConfig:
 
     def test_valid_config(self) -> None:
         cfg = self._make_cfg()
-        packer._validate_project_config(cfg)  # should not raise
+        validate_project_config(cfg)  # should not raise
 
     def test_no_scripts_raises(self) -> None:
         cfg = self._make_cfg(scripts=[])
         with pytest.raises(ConfigError, match="No .*scripts"):
-            packer._validate_project_config(cfg)
+            validate_project_config(cfg)
 
     def test_duplicate_script_names_raises(self) -> None:
         cfg = self._make_cfg(
             scripts=[
-                packer.ScriptDefinition(name="app", target="a:main", gui=False),
-                packer.ScriptDefinition(name="app", target="b:main", gui=True),
+                ScriptDefinition(name="app", target="a:main", gui=False),
+                ScriptDefinition(name="app", target="b:main", gui=True),
             ]
         )
         with pytest.raises(ConfigError, match="Duplicate script names"):
-            packer._validate_project_config(cfg)
+            validate_project_config(cfg)
 
     def test_no_build_system_raises(self) -> None:
         cfg = self._make_cfg(build_system={})
         with pytest.raises(ConfigError, match="No .*build-system"):
-            packer._validate_project_config(cfg)
+            validate_project_config(cfg)
 
     def test_none_requires_python_raises(self) -> None:
         cfg = self._make_cfg(requires_python=None)
         with pytest.raises(ConfigError, match="must be set"):
-            packer._validate_project_config(cfg)
+            validate_project_config(cfg)
 
     def test_invalid_requires_python_format_raises(self) -> None:
         cfg = self._make_cfg(requires_python=">=3.10")
         with pytest.raises(ConfigError, match="exact minor"):
-            packer._validate_project_config(cfg)
+            validate_project_config(cfg)
+
+    def test_invalid_script_name_raises(self) -> None:
+        cfg = self._make_cfg(
+            scripts=[ScriptDefinition(name="../evil", target="demo.main:main")]
+        )
+        with pytest.raises(ConfigError, match="Invalid script name"):
+            validate_project_config(cfg)
+
+    def test_reserved_windows_script_name_raises(self) -> None:
+        cfg = self._make_cfg(
+            scripts=[ScriptDefinition(name="CON", target="demo.main:main")]
+        )
+        with pytest.raises(ConfigError, match="reserved Windows device names"):
+            validate_project_config(cfg)
+
+    def test_control_character_script_name_raises(self) -> None:
+        cfg = self._make_cfg(
+            scripts=[ScriptDefinition(name="demo\x00app", target="demo.main:main")]
+        )
+        with pytest.raises(ConfigError, match="control characters"):
+            validate_project_config(cfg)
+
+    def test_reserved_windows_script_name_with_extension_raises(self) -> None:
+        cfg = self._make_cfg(
+            scripts=[ScriptDefinition(name="CON.txt", target="demo.main:main")]
+        )
+        with pytest.raises(ConfigError, match="reserved Windows device names"):
+            validate_project_config(cfg)
+
+    def test_invalid_project_name_for_default_output_raises(self) -> None:
+        cfg = self._make_cfg(name="../../escape")
+        with pytest.raises(ConfigError, match="default output directory name"):
+            validate_project_config(cfg)
 
 
 class TestResolveOutputDir:
     def test_explicit_output(self, tmp_path: Path) -> None:
-        cfg = packer.ProjectConfig(
+        cfg = ProjectConfig(
             root=tmp_path / "proj",
             name="demo",
             requires_python="==3.12.*",
-            scripts=[packer.ScriptDefinition(name="d", target="d:main")],
+            scripts=[ScriptDefinition(name="d", target="d:main")],
             build_system={"requires": ["uv_build"]},
         )
-        result = packer._resolve_output_dir(cfg, tmp_path, tmp_path / "custom")
+        result = resolve_output_dir(cfg, tmp_path, tmp_path / "custom")
         assert result == tmp_path / "custom"
 
     def test_default_output(self, tmp_path: Path) -> None:
-        cfg = packer.ProjectConfig(
+        cfg = ProjectConfig(
             root=tmp_path / "proj",
             name="my-app",
             requires_python="==3.12.*",
-            scripts=[packer.ScriptDefinition(name="a", target="a:main")],
+            scripts=[ScriptDefinition(name="a", target="a:main")],
             build_system={"requires": ["uv_build"]},
         )
-        result = packer._resolve_output_dir(cfg, tmp_path, None)
+        result = resolve_output_dir(cfg, tmp_path, None)
         assert result == tmp_path / "dist" / "my-app"
+
+    def test_rejects_project_dir_output(self, tmp_path: Path) -> None:
+        cfg = ProjectConfig(
+            root=tmp_path,
+            name="demo",
+            requires_python="==3.12.*",
+            scripts=[ScriptDefinition(name="d", target="d:main")],
+            build_system={"requires": ["uv_build"]},
+        )
+        with pytest.raises(ConfigError, match="must not be the project directory"):
+            resolve_output_dir(cfg, tmp_path, tmp_path)
+
+    def test_rejects_unresolved_project_dir_output(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        cfg = ProjectConfig(
+            root=project_dir,
+            name="demo",
+            requires_python="==3.12.*",
+            scripts=[ScriptDefinition(name="d", target="d:main")],
+            build_system={"requires": ["uv_build"]},
+        )
+        with pytest.raises(ConfigError, match="must not be the project directory"):
+            resolve_output_dir(cfg, project_dir.resolve(), project_dir / ".")
+
+    def test_allows_output_inside_project(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        cfg = ProjectConfig(
+            root=project_dir,
+            name="demo",
+            requires_python="==3.12.*",
+            scripts=[ScriptDefinition(name="d", target="d:main")],
+            build_system={"requires": ["uv_build"]},
+        )
+        result = resolve_output_dir(cfg, project_dir, project_dir / "dist" / "demo")
+        assert result == project_dir / "dist" / "demo"
+
+    def test_rejects_output_containing_project(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        cfg = ProjectConfig(
+            root=project_dir,
+            name="demo",
+            requires_python="==3.12.*",
+            scripts=[ScriptDefinition(name="d", target="d:main")],
+            build_system={"requires": ["uv_build"]},
+        )
+        with pytest.raises(ConfigError, match="must not contain the project directory"):
+            resolve_output_dir(cfg, project_dir, tmp_path)
+
+    def test_rejects_home_output(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        home_dir = tmp_path / "home"
+        home_dir.mkdir()
+        cfg = ProjectConfig(
+            root=tmp_path / "project",
+            name="demo",
+            requires_python="==3.12.*",
+            scripts=[ScriptDefinition(name="d", target="d:main")],
+            build_system={"requires": ["uv_build"]},
+        )
+        monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: home_dir))
+        with pytest.raises(ConfigError, match="home directory"):
+            resolve_output_dir(cfg, cfg.root, home_dir)
 
 
 class TestPrepareLayout:
+    """These orchestration helpers remain on ``packer``."""
+
     def test_creates_directories(self, tmp_path: Path) -> None:
         output = tmp_path / "out"
         layout = packer._prepare_layout(output)
@@ -223,6 +349,8 @@ class TestPrepareLayout:
 
 
 class TestPatchEmbeddedRuntimeConfig:
+    """These orchestration helpers remain on ``packer``."""
+
     def test_appends_packages_path_to_pth(self, tmp_path: Path) -> None:
         runtime = tmp_path / "runtime"
         runtime.mkdir()
@@ -249,13 +377,11 @@ class TestPatchEmbeddedRuntimeConfig:
         pth.write_text("Lib\n..\\packages\n", encoding="utf-8")
 
         packer._patch_embedded_runtime_config(runtime)
-        # Should not add a second line
         assert pth.read_text(encoding="utf-8").count("..\\packages") == 1
 
     def test_no_pth_file_silently_ignored(self, tmp_path: Path) -> None:
         runtime = tmp_path / "runtime"
         runtime.mkdir()
-        # No .pth file
         packer._patch_embedded_runtime_config(runtime)  # should not raise
 
 
@@ -263,58 +389,56 @@ class TestResolveProjectRoots:
     def test_returns_normalized_discovered_roots(self, tmp_path: Path) -> None:
         app_dir = tmp_path / "packages"
         app_dir.mkdir()
-        # Don't need actual dirs; normalized is just deduplicated
-        result = packer._resolve_project_roots(app_dir, ("demo", "util", "demo"), "proj")
+        result = resolve_project_roots(app_dir, ("demo", "util", "demo"), "proj")
         assert result == ("demo", "util")
 
     def test_fallback_with_package_dir(self, tmp_path: Path) -> None:
         app_dir = tmp_path / "packages"
         app_dir.mkdir()
         (app_dir / "proj").mkdir()
-        result = packer._resolve_project_roots(app_dir, (), "proj")
+        result = resolve_project_roots(app_dir, (), "proj")
         assert result == ("proj",)
 
     def test_fallback_with_dash_to_underscore(self, tmp_path: Path) -> None:
         app_dir = tmp_path / "packages"
         app_dir.mkdir()
         (app_dir / "my_app").mkdir()
-        result = packer._resolve_project_roots(app_dir, (), "my-app")
-        # my-app doesn't exist on disk, only my_app does, so only my_app returned
+        result = resolve_project_roots(app_dir, (), "my-app")
         assert result == ("my_app",)
 
     def test_fallback_with_py_module_file(self, tmp_path: Path) -> None:
         app_dir = tmp_path / "packages"
         app_dir.mkdir()
         (app_dir / "app.py").write_text("pass")
-        result = packer._resolve_project_roots(app_dir, (), "app")
+        result = resolve_project_roots(app_dir, (), "app")
         assert result == ("app",)
 
     def test_fallback_with_pyc_module_file(self, tmp_path: Path) -> None:
         app_dir = tmp_path / "packages"
         app_dir.mkdir()
         (app_dir / "lib.pyc").write_bytes(b"")
-        result = packer._resolve_project_roots(app_dir, (), "lib")
+        result = resolve_project_roots(app_dir, (), "lib")
         assert result == ("lib",)
 
     def test_fallback_no_match_returns_empty(self, tmp_path: Path) -> None:
         app_dir = tmp_path / "packages"
         app_dir.mkdir()
-        result = packer._resolve_project_roots(app_dir, (), "unknown")
+        result = resolve_project_roots(app_dir, (), "unknown")
         assert result == ()
 
 
 class TestNormalizeDistributionName:
     def test_lowercase(self) -> None:
-        assert packer._normalize_distribution_name("MyProject") == "myproject"
+        assert _normalize_distribution_name("MyProject") == "myproject"
 
     def test_replaces_dashes_and_underscores(self) -> None:
-        assert packer._normalize_distribution_name("my-project_name") == "my-project-name"
+        assert _normalize_distribution_name("my-project_name") == "my-project-name"
 
     def test_replaces_dots(self) -> None:
-        assert packer._normalize_distribution_name("my.project") == "my-project"
+        assert _normalize_distribution_name("my.project") == "my-project"
 
     def test_multiple_separators(self) -> None:
-        assert packer._normalize_distribution_name("my__project..name") == "my-project-name"
+        assert _normalize_distribution_name("my__project..name") == "my-project-name"
 
 
 class TestReadMetadataName:
@@ -324,7 +448,7 @@ class TestReadMetadataName:
             "Metadata-Version: 2.1\nName: my-package\nVersion: 0.1.0\n",
             encoding="utf-8",
         )
-        assert packer._read_metadata_name(meta) == "my-package"
+        assert _read_metadata_name(meta) == "my-package"
 
     def test_no_name_line_returns_none(self, tmp_path: Path) -> None:
         meta = tmp_path / "METADATA"
@@ -332,27 +456,27 @@ class TestReadMetadataName:
             "Metadata-Version: 2.1\nVersion: 0.1.0\n",
             encoding="utf-8",
         )
-        assert packer._read_metadata_name(meta) is None
+        assert _read_metadata_name(meta) is None
 
     def test_empty_file_returns_none(self, tmp_path: Path) -> None:
         meta = tmp_path / "METADATA"
         meta.write_text("")
-        assert packer._read_metadata_name(meta) is None
+        assert _read_metadata_name(meta) is None
 
     def test_name_with_spaces(self, tmp_path: Path) -> None:
         meta = tmp_path / "METADATA"
         meta.write_text("Name:   spaced-name  \n")
-        assert packer._read_metadata_name(meta) == "spaced-name"
+        assert _read_metadata_name(meta) == "spaced-name"
 
 
 class TestLogDownloadSources:
-    def test_default_config_silent(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_default_config_silent(self, capsys: pytest.CaptureFixture[str]) -> None:
         from uvpacker.domain.sources import DEFAULT_DOWNLOAD_CONFIG
 
         packer._log_download_sources(DEFAULT_DOWNLOAD_CONFIG)
         assert "[uvpacker]" not in capsys.readouterr().out
 
-    def test_non_default_config_logs(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_non_default_config_logs(self, capsys: pytest.CaptureFixture[str]) -> None:
         from uvpacker.domain.sources import PackDownloadConfig
 
         custom = PackDownloadConfig(embed_index_base="https://mirror.example.com/python/")
@@ -371,7 +495,7 @@ class TestRemoveNonRuntimeScriptShims:
         (packages / "Scripts" / "uvicorn.exe").write_bytes(b"exe")
         (packages / "requests").mkdir(parents=True)
 
-        packer._remove_non_runtime_script_shims(packages)
+        remove_non_runtime_script_shims(packages)
 
         assert not (packages / "bin").exists()
         assert not (packages / "Scripts").exists()
@@ -380,7 +504,7 @@ class TestRemoveNonRuntimeScriptShims:
     def test_no_op_when_dirs_missing(self, tmp_path: Path) -> None:
         packages = tmp_path / "packages"
         packages.mkdir()
-        packer._remove_non_runtime_script_shims(packages)  # should not raise
+        remove_non_runtime_script_shims(packages)  # should not raise
 
 
 class TestRemoveProjectDistInfo:
@@ -392,7 +516,7 @@ class TestRemoveProjectDistInfo:
             "Metadata-Version: 2.1\nName: demo-app\n", encoding="utf-8"
         )
 
-        packer._remove_project_dist_info(packages, "demo_app")
+        _remove_project_dist_info(packages, "demo_app")
         assert not own.exists()
 
     def test_keeps_non_matching(self, tmp_path: Path) -> None:
@@ -403,40 +527,40 @@ class TestRemoveProjectDistInfo:
             "Metadata-Version: 2.1\nName: requests\n", encoding="utf-8"
         )
 
-        packer._remove_project_dist_info(packages, "demo")
+        _remove_project_dist_info(packages, "demo")
         assert dep.exists()
 
     def test_no_dist_info_dirs_present(self, tmp_path: Path) -> None:
         packages = tmp_path / "packages"
         packages.mkdir()
-        packer._remove_project_dist_info(packages, "demo")  # should not raise
+        _remove_project_dist_info(packages, "demo")  # should not raise
 
 
 class TestValidateEmbeddableFile:
     def test_pyd_raises(self) -> None:
         with pytest.raises(BuildError, match="cannot be embedded"):
-            packer._validate_embeddable_file("demo", pathlib.Path("demo/fast.pyd"))
+            validate_embeddable_file("demo", pathlib.Path("demo/fast.pyd"))
 
     def test_dll_raises(self) -> None:
         with pytest.raises(BuildError, match="cannot be embedded"):
-            packer._validate_embeddable_file("demo", pathlib.Path("demo/native.dll"))
+            validate_embeddable_file("demo", pathlib.Path("demo/native.dll"))
 
     def test_so_raises(self) -> None:
         with pytest.raises(BuildError, match="cannot be embedded"):
-            packer._validate_embeddable_file("demo", pathlib.Path("demo/impl.so"))
+            validate_embeddable_file("demo", pathlib.Path("demo/impl.so"))
 
     def test_dylib_raises(self) -> None:
         with pytest.raises(BuildError, match="cannot be embedded"):
-            packer._validate_embeddable_file("demo", pathlib.Path("demo/core.dylib"))
+            validate_embeddable_file("demo", pathlib.Path("demo/core.dylib"))
 
     def test_pyc_is_allowed(self) -> None:
-        packer._validate_embeddable_file("demo", pathlib.Path("demo/__init__.pyc"))
+        validate_embeddable_file("demo", pathlib.Path("demo/__init__.pyc"))
 
     def test_py_is_allowed(self) -> None:
-        packer._validate_embeddable_file("demo", pathlib.Path("demo/main.py"))
+        validate_embeddable_file("demo", pathlib.Path("demo/main.py"))
 
     def test_txt_is_allowed(self) -> None:
-        packer._validate_embeddable_file("demo", pathlib.Path("demo/data.txt"))
+        validate_embeddable_file("demo", pathlib.Path("demo/data.txt"))
 
 
 class TestExistingProjectDirs:
@@ -444,7 +568,7 @@ class TestExistingProjectDirs:
         app_dir = tmp_path / "packages"
         (app_dir / "pkg_a").mkdir(parents=True)
         (app_dir / "pkg_b").mkdir(parents=True)
-        result = packer._existing_project_dirs(app_dir, ("pkg_a", "pkg_b", "pkg_c"))
+        result = existing_project_dirs(app_dir, ("pkg_a", "pkg_b", "pkg_c"))
         assert len(result) == 2
         assert app_dir / "pkg_a" in result
         assert app_dir / "pkg_b" in result
@@ -452,5 +576,5 @@ class TestExistingProjectDirs:
     def test_no_matching_dirs(self, tmp_path: Path) -> None:
         app_dir = tmp_path / "packages"
         app_dir.mkdir()
-        result = packer._existing_project_dirs(app_dir, ("nonexistent",))
+        result = existing_project_dirs(app_dir, ("nonexistent",))
         assert result == []

@@ -1,3 +1,11 @@
+"""
+Tests for embedded-payload helpers, targeting the extracted seam modules directly.
+
+* ``services.payload_archive`` — zip construction and launcher assembly
+* ``services.package_tree`` — non-runtime shim removal
+* ``uvpacker.launcher._payload`` — binary payload protocol
+"""
+
 from __future__ import annotations
 
 import io
@@ -7,12 +15,16 @@ from pathlib import Path
 
 import pytest
 
-from uvpacker.infra import uv_client
 from uvpacker.domain.errors import BuildError
+from uvpacker.infra import uv_client
+from uvpacker.launcher._payload import MAGIC, TRAILER_STRUCT, _make_payload
+from uvpacker.services.package_tree import remove_non_runtime_script_shims
+from uvpacker.services.payload_archive import (
+    _build_project_archive,
+    _remove_project_dist_info,
+    _remove_project_roots,
+)
 import uvpacker
-
-from uvpacker.launcher import MAGIC, TRAILER_STRUCT, _make_payload
-from uvpacker.services import packer
 
 
 def test_make_payload_appends_archive_then_metadata_then_footer() -> None:
@@ -56,7 +68,7 @@ def test_build_project_archive_and_remove_roots(tmp_path: Path) -> None:
     (pkg_dir / "data.txt").write_text("hello", encoding="utf-8")
     (packages / "helper_mod.pyc").write_bytes(b"mod")
 
-    archive = packer._build_project_archive(packages, ("demo", "helper_mod"))
+    archive = _build_project_archive(packages, ("demo", "helper_mod"))
 
     with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
         assert sorted(bundle.namelist()) == [
@@ -66,7 +78,7 @@ def test_build_project_archive_and_remove_roots(tmp_path: Path) -> None:
         ]
         assert bundle.read("demo/data.txt") == b"hello"
 
-    packer._remove_project_roots(packages, ("demo", "helper_mod"))
+    _remove_project_roots(packages, ("demo", "helper_mod"))
 
     assert not pkg_dir.exists()
     assert not (packages / "helper_mod.pyc").exists()
@@ -80,7 +92,7 @@ def test_build_project_archive_rejects_native_extensions(tmp_path: Path) -> None
     (pkg_dir / "fast.pyd").write_bytes(b"native")
 
     with pytest.raises(BuildError, match="cannot be embedded purely in-memory"):
-        packer._build_project_archive(packages, ("demo",))
+        _build_project_archive(packages, ("demo",))
 
 
 def test_remove_project_dist_info_only_removes_target_project(tmp_path: Path) -> None:
@@ -96,7 +108,7 @@ def test_remove_project_dist_info_only_removes_target_project(tmp_path: Path) ->
         "Metadata-Version: 2.1\nName: requests\n", encoding="utf-8"
     )
 
-    packer._remove_project_dist_info(packages, "demo_app")
+    _remove_project_dist_info(packages, "demo_app")
 
     assert not own.exists()
     assert dep.exists()
@@ -112,7 +124,7 @@ def test_remove_non_runtime_script_shims_removes_bin_and_scripts(
     (packages / "Scripts" / "uvicorn.exe").write_bytes(b"exe")
     (packages / "requests").mkdir(parents=True)
 
-    packer._remove_non_runtime_script_shims(packages)
+    remove_non_runtime_script_shims(packages)
 
     assert not (packages / "bin").exists()
     assert not (packages / "Scripts").exists()

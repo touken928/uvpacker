@@ -179,7 +179,7 @@ class TestRunCommand:
     def test_failure_raises(self) -> None:
         with pytest.raises(BuildError, match="Command failed"):
             uv_client._run_command(
-                ["python", "-c", "import sys; sys.exit(1)"],
+                [sys.executable, "-c", "import sys; sys.exit(1)"],
                 cwd=Path.cwd(),
             )
 

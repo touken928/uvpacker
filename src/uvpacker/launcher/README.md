@@ -32,7 +32,7 @@ The launcher reads from EOF: magic → JSON length → JSON text → uses `archi
 
 ### JSON metadata contents
 
-The metadata is a single JSON object. `uvpacker.launcher` builds it in `_make_payload()`; fields below are what the runtime expects today.
+The metadata is a single JSON object. `uvpacker.launcher._payload` builds it in `_make_payload()`; fields below are what the runtime expects today.
 
 | Field | Type | Required | Meaning |
 |-------|------|----------|---------|

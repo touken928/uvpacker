@@ -88,8 +88,13 @@ static const char INIT_SCRIPT[] =
     "        return self._archive.is_dir(self._path)\n"
     "    def is_file(self):\n"
     "        return self._archive.is_file(self._path)\n"
-    "    def joinpath(self, child):\n"
-    "        return _MemTraversable(self._archive, _pp.join(self._path, child) if self._path else child)\n"
+    "    def joinpath(self, *children):\n"
+    "        new_path = self._path\n"
+    "        for child in children:\n"
+    "            new_path = _pp.join(new_path, child) if new_path else child\n"
+    "        return _MemTraversable(self._archive, new_path)\n"
+    "    def __truediv__(self, child):\n"
+    "        return self.joinpath(child)\n"
     "    def open(self, mode='r', *args, **kwargs):\n"
     "        if not self.is_file():\n"
     "            raise FileNotFoundError(self._path)\n"
@@ -259,58 +264,70 @@ static wchar_t *build_init_script(const wchar_t *exePath) {
 }
 
 static int run_python(const wchar_t *exePath) {
-    wchar_t runtimeDir[MAX_PATH];
-    wchar_t pythonDll[MAX_PATH];
+    wchar_t *runtimeDir = NULL;
+    wchar_t *pythonDll = NULL;
+    HMODULE hDLL = NULL;
+    wchar_t *initScript = NULL;
+    LPWSTR *argv = NULL;
+    wchar_t **pyArgv = NULL;
+    int ret = 1;
+    int argc = 0;
 
-    wcsncpy(runtimeDir, exePath, MAX_PATH);
-    runtimeDir[MAX_PATH - 1] = L'\0';
-    wchar_t *lastSlash = wcsrchr(runtimeDir, L'\\');
-    if (lastSlash) {
-        *lastSlash = L'\0';
+    {
+        const wchar_t *lastSlash = wcsrchr(exePath, L'\\');
+        if (!lastSlash) {
+            goto cleanup;
+        }
+        size_t dirLen = (size_t)(lastSlash - exePath);
+        size_t runtimeDirLen = dirLen + 9;
+        runtimeDir = (wchar_t *)HeapAlloc(GetProcessHeap(), 0,
+                                          sizeof(wchar_t) * runtimeDirLen);
+        if (!runtimeDir) {
+            goto cleanup;
+        }
+        wcsncpy(runtimeDir, exePath, dirLen);
+        runtimeDir[dirLen] = L'\0';
+        wcscat(runtimeDir, L"\\runtime");
     }
-    wcscat(runtimeDir, L"\\runtime");
 
     SetDllDirectoryW(runtimeDir);
-    wcscpy(pythonDll, runtimeDir);
-    wcscat(pythonDll, L"\\python3.dll");
 
-    HMODULE hDLL = LoadLibraryW(pythonDll);
+    {
+        size_t pythonDllLen = wcslen(runtimeDir) + 13;
+        pythonDll = (wchar_t *)HeapAlloc(GetProcessHeap(), 0,
+                                          sizeof(wchar_t) * pythonDllLen);
+        if (!pythonDll) {
+            goto cleanup;
+        }
+        wcscpy(pythonDll, runtimeDir);
+        wcscat(pythonDll, L"\\python3.dll");
+    }
+
+    hDLL = LoadLibraryW(pythonDll);
     if (!hDLL) {
-        return 1;
+        goto cleanup;
     }
 
     int (*Py_Main)(int, wchar_t **) =
         (int (*)(int, wchar_t **))GetProcAddress(hDLL, "Py_Main");
     if (!Py_Main) {
-        FreeLibrary(hDLL);
-        return 1;
+        goto cleanup;
     }
 
-    wchar_t *initScript = build_init_script(exePath);
+    initScript = build_init_script(exePath);
     if (!initScript) {
-        FreeLibrary(hDLL);
-        return 1;
+        goto cleanup;
     }
 
-    int argc;
-    LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (!argv) {
-        HeapFree(GetProcessHeap(), 0, initScript);
-        FreeLibrary(hDLL);
-        return 1;
+        goto cleanup;
     }
 
-    int pyArgc = argc + 5;
-    wchar_t **pyArgv = (wchar_t **)HeapAlloc(
-        GetProcessHeap(),
-        0,
-        sizeof(wchar_t *) * pyArgc
-    );
+    pyArgv = (wchar_t **)HeapAlloc(GetProcessHeap(), 0,
+                                    sizeof(wchar_t *) * (size_t)(argc + 5));
     if (!pyArgv) {
-        LocalFree(argv);
-        HeapFree(GetProcessHeap(), 0, initScript);
-        FreeLibrary(hDLL);
-        return 1;
+        goto cleanup;
     }
 
     pyArgv[0] = (wchar_t *)exePath;
@@ -323,22 +340,49 @@ static int run_python(const wchar_t *exePath) {
         pyArgv[5 + i] = argv[i];
     }
 
-    int ret = Py_Main(pyArgc, pyArgv);
+    ret = Py_Main(argc + 5, pyArgv);
 
+cleanup:
     HeapFree(GetProcessHeap(), 0, pyArgv);
     LocalFree(argv);
     HeapFree(GetProcessHeap(), 0, initScript);
     FreeLibrary(hDLL);
+    HeapFree(GetProcessHeap(), 0, pythonDll);
+    HeapFree(GetProcessHeap(), 0, runtimeDir);
     return ret;
 }
 
 static int run_launcher(void) {
-    wchar_t exePath[MAX_PATH];
-    if (!GetModuleFileNameW(NULL, exePath, MAX_PATH)) {
-        return 1;
+    DWORD size = MAX_PATH;
+    wchar_t *exePath = NULL;
+    int ret = 1;
+
+    for (;;) {
+        wchar_t *buffer = (wchar_t *)HeapAlloc(GetProcessHeap(), 0, sizeof(wchar_t) * (size_t)size);
+        if (!buffer) {
+            goto cleanup;
+        }
+        DWORD copied = GetModuleFileNameW(NULL, buffer, size);
+        if (copied == 0) {
+            HeapFree(GetProcessHeap(), 0, buffer);
+            goto cleanup;
+        }
+        if (copied < size - 1) {
+            exePath = buffer;
+            break;
+        }
+        HeapFree(GetProcessHeap(), 0, buffer);
+        if (size > 32768) {
+            goto cleanup;
+        }
+        size *= 2;
     }
 
-    return run_python(exePath);
+    ret = run_python(exePath);
+
+cleanup:
+    HeapFree(GetProcessHeap(), 0, exePath);
+    return ret;
 }
 
 #ifdef UVPK_GUI
