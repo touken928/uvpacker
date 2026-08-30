@@ -74,14 +74,18 @@ def resolve_output_dir(
     """Resolve the final output directory, defaulting to ``dist/<name>``."""
     if isinstance(project_name, ProjectConfig):
         project_name = project_name.name
+    default_output = (project_dir / "dist" / project_name).resolve()
     if output_dir is not None:
         output_dir = output_dir.resolve()
-        validate_output_dir(project_dir, output_dir)
+        # The documented default is the only output location allowed inside
+        # the source tree.  Arbitrary children such as ``src/`` are unsafe
+        # because publishing replaces the entire output directory.
+        if output_dir != default_output:
+            validate_output_dir(project_dir, output_dir)
         if output_dir == pathlib.Path.home():
             raise ConfigError(
                 f"Refusing to use home directory as output directory: {output_dir}"
             )
         return output_dir
 
-    dist_dir = project_dir / "dist"
-    return dist_dir / project_name
+    return default_output

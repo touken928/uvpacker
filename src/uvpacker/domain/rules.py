@@ -71,6 +71,10 @@ def validate_output_dir(project_dir: Path, output_dir: Path) -> None:
         raise ConfigError(
             f"Output directory must not contain the project directory: {output_dir}"
         )
+    if project_dir in output_dir.parents:
+        raise ConfigError(
+            f"Output directory must not be inside the project directory: {output_dir}"
+        )
 
 
 def validate_project_config(cfg: ProjectConfig) -> None:
@@ -80,7 +84,9 @@ def validate_project_config(cfg: ProjectConfig) -> None:
             "No [project.scripts] or [project.gui-scripts] defined in pyproject.toml; "
             "at least one entry is required.",
         )
-    names = [s.name for s in cfg.scripts]
+    # Launcher files are consumed on Windows, whose common filesystems are
+    # case-insensitive.  Reject names that would address the same .exe there.
+    names = [s.name.casefold() for s in cfg.scripts]
     if len(names) != len(set(names)):
         raise ConfigError(
             "Duplicate script names between [project.scripts] and [project.gui-scripts]; "

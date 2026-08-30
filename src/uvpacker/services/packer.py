@@ -12,8 +12,11 @@ Implementation details live in sibling modules:
 
 from __future__ import annotations
 
+import contextlib
 import pathlib
 import shutil
+import tempfile
+from collections.abc import Iterator
 
 from ..domain.models import PackLayout, ProjectConfig
 from ..domain.rules import require_exact_minor_from_requires, validate_project_config
@@ -78,15 +81,15 @@ def pack_project(
 
     resolved_output = _resolve_output_dir(cfg.name, project_dir, output_dir)
     kv("Output", resolved_output)
-    layout = _prepare_layout(resolved_output)
-
-    _perform_pack(
-        cfg=cfg,
-        project_dir=project_dir,
-        layout=layout,
-        python_version=target_python,
-        download=dl,
-    )
+    with _staged_layout(resolved_output) as layout:
+        _perform_pack(
+            cfg=cfg,
+            project_dir=project_dir,
+            layout=layout,
+            python_version=target_python,
+            download=dl,
+        )
+    success("Done.")
 
 
 def _perform_pack(
@@ -144,7 +147,6 @@ def _perform_pack(
         launchers_dir=layout.root,
         archive=project_archive,
     )
-    success("Done.")
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +179,54 @@ def _prepare_layout(output_dir: pathlib.Path) -> PackLayout:
     embedded_dir.mkdir()
     app_dir.mkdir()
     return PackLayout(root=output_dir, runtime=embedded_dir, packages=app_dir)
+
+
+@contextlib.contextmanager
+def _staged_layout(output_dir: pathlib.Path) -> Iterator[PackLayout]:
+    """Build beside *output_dir* and publish only after a successful build."""
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging_dir = pathlib.Path(
+        tempfile.mkdtemp(prefix=f".{output_dir.name}.tmp-", dir=output_dir.parent)
+    )
+    try:
+        layout = _prepare_layout(staging_dir)
+        yield layout
+        _publish_staged_output(staging_dir, output_dir)
+    finally:
+        _remove_path(staging_dir)
+
+
+def _publish_staged_output(staging_dir: pathlib.Path, output_dir: pathlib.Path) -> None:
+    """Replace *output_dir*, restoring it if publishing the staging tree fails."""
+    backup_dir: pathlib.Path | None = None
+    if output_dir.exists() or output_dir.is_symlink():
+        backup_dir = pathlib.Path(
+            tempfile.mkdtemp(
+                prefix=f".{output_dir.name}.backup-", dir=output_dir.parent
+            )
+        )
+        backup_dir.rmdir()
+        output_dir.replace(backup_dir)
+
+    try:
+        staging_dir.replace(output_dir)
+    except BaseException:
+        if backup_dir is not None and backup_dir.exists():
+            backup_dir.replace(output_dir)
+        raise
+    else:
+        if backup_dir is not None:
+            _remove_path(backup_dir)
+
+
+def _remove_path(path: pathlib.Path) -> None:
+    if path.is_symlink() or path.is_file():
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    elif path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def _patch_embedded_runtime_config(embedded_dir: pathlib.Path) -> None:

@@ -28,7 +28,7 @@ def strip_source_to_pyc(
     files for the target project, but does not make reverse engineering
     impossible.
     """
-    target_dirs = _existing_project_dirs(app_dir, project_roots) or [app_dir]
+    target_dirs = _existing_project_dirs(app_dir, project_roots)
 
     for pkg_dir in target_dirs:
         _compile_directory_tree_to_pyc(pkg_dir, target_python_minor)
@@ -86,9 +86,9 @@ def _compile_module_to_pyc(
     _run_uv_python(
         target_python_minor=target_python_minor,
         cwd=app_dir,
-        python_args=["-m", "py_compile", str(module_py)],
+        python_args=["-m", "compileall", "-b", str(module_py)],
         failure_message=(
-            f"'uv run --no-project --python {target_python_minor} python -m py_compile' "
+            f"'uv run --no-project --python {target_python_minor} python -m compileall' "
             f"failed for module {module_py.name!r}"
         ),
     )

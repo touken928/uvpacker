@@ -109,6 +109,12 @@ class TestValidateOutputDir:
         with pytest.raises(ConfigError, match="must not contain"):
             validate_output_dir(project_dir, tmp_path)
 
+    def test_rejects_output_inside_project(self, tmp_path: pathlib.Path) -> None:
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        with pytest.raises(ConfigError, match="inside the project directory"):
+            validate_output_dir(project_dir, project_dir / "src")
+
     def test_rejects_root(self, tmp_path: pathlib.Path) -> None:
         project_dir = tmp_path / "project"
         project_dir.mkdir()
@@ -164,6 +170,16 @@ class TestValidateProjectConfig:
         cfg = self._make_cfg(
             scripts=[
                 ScriptDefinition(name="app", target="a:main", gui=False),
+                ScriptDefinition(name="app", target="b:main", gui=True),
+            ]
+        )
+        with pytest.raises(ConfigError, match="Duplicate script names"):
+            validate_project_config(cfg)
+
+    def test_case_insensitive_duplicate_script_names_raises(self) -> None:
+        cfg = self._make_cfg(
+            scripts=[
+                ScriptDefinition(name="App", target="a:main", gui=False),
                 ScriptDefinition(name="app", target="b:main", gui=True),
             ]
         )

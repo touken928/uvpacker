@@ -20,6 +20,7 @@ from uvpacker.domain.errors import BuildError, ConfigError
 from uvpacker.domain.models import ProjectConfig, ScriptDefinition
 from uvpacker.domain.rules import validate_embeddable_file, validate_project_config
 from uvpacker.services import packer
+from uvpacker.services.bytecode import _compile_module_to_pyc, strip_source_to_pyc
 from uvpacker.services.package_tree import (
     existing_project_dirs,
     remove_non_runtime_script_shims,
@@ -241,14 +242,16 @@ class TestValidateProjectConfig:
 
 class TestResolveOutputDir:
     def test_explicit_output(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
         cfg = ProjectConfig(
-            root=tmp_path / "proj",
+            root=project_dir,
             name="demo",
             requires_python="==3.12.*",
             scripts=[ScriptDefinition(name="d", target="d:main")],
             build_system={"requires": ["uv_build"]},
         )
-        result = resolve_output_dir(cfg, tmp_path, tmp_path / "custom")
+        result = resolve_output_dir(cfg, project_dir, tmp_path / "custom")
         assert result == tmp_path / "custom"
 
     def test_default_output(self, tmp_path: Path) -> None:
@@ -299,6 +302,19 @@ class TestResolveOutputDir:
         result = resolve_output_dir(cfg, project_dir, project_dir / "dist" / "demo")
         assert result == project_dir / "dist" / "demo"
 
+    def test_rejects_non_default_output_inside_project(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        cfg = ProjectConfig(
+            root=project_dir,
+            name="demo",
+            requires_python="==3.12.*",
+            scripts=[ScriptDefinition(name="d", target="d:main")],
+            build_system={"requires": ["uv_build"]},
+        )
+        with pytest.raises(ConfigError, match="inside the project directory"):
+            resolve_output_dir(cfg, project_dir, project_dir / "src")
+
     def test_rejects_output_containing_project(self, tmp_path: Path) -> None:
         project_dir = tmp_path / "project"
         project_dir.mkdir()
@@ -346,6 +362,96 @@ class TestPrepareLayout:
         (output / "old_file.txt").write_text("stale")
         packer._prepare_layout(output)
         assert not (output / "old_file.txt").exists()
+
+
+class TestStagedLayout:
+    def test_failed_build_preserves_previous_output(self, tmp_path: Path) -> None:
+        output = tmp_path / "out"
+        output.mkdir()
+        (output / "working.exe").write_bytes(b"old")
+
+        with (
+            pytest.raises(BuildError, match="simulated failure"),
+            packer._staged_layout(output) as layout,
+        ):
+            (layout.root / "broken.exe").write_bytes(b"partial")
+            raise BuildError("simulated failure")
+
+        assert (output / "working.exe").read_bytes() == b"old"
+        assert not (output / "broken.exe").exists()
+
+    def test_successful_build_replaces_previous_output(self, tmp_path: Path) -> None:
+        output = tmp_path / "out"
+        output.mkdir()
+        (output / "stale.exe").write_bytes(b"old")
+
+        with packer._staged_layout(output) as layout:
+            (layout.root / "current.exe").write_bytes(b"new")
+
+        assert not (output / "stale.exe").exists()
+        assert (output / "current.exe").read_bytes() == b"new"
+
+    def test_publish_failure_restores_previous_output(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        output = tmp_path / "out"
+        output.mkdir()
+        (output / "working.exe").write_bytes(b"old")
+        original_replace = Path.replace
+
+        def fail_staging_replace(path: Path, target: Path) -> Path:
+            if path.name.startswith(".out.tmp-"):
+                raise OSError("simulated publish failure")
+            return original_replace(path, target)
+
+        monkeypatch.setattr(Path, "replace", fail_staging_replace)
+
+        with (
+            pytest.raises(OSError, match="simulated publish failure"),
+            packer._staged_layout(output) as layout,
+        ):
+            (layout.root / "current.exe").write_bytes(b"new")
+
+        assert (output / "working.exe").read_bytes() == b"old"
+        assert not (output / "current.exe").exists()
+
+
+class TestStripSourceToPyc:
+    def test_single_module_bytecode_is_written_beside_source(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module = tmp_path / "demo.py"
+        module.write_text("VALUE = 1\n")
+        calls: list[list[str]] = []
+
+        monkeypatch.setattr(
+            "uvpacker.services.bytecode._run_uv_python",
+            lambda **kwargs: calls.append(kwargs["python_args"]),
+        )
+
+        _compile_module_to_pyc(module, tmp_path, "3.12")
+
+        assert calls == [["-m", "compileall", "-b", str(module)]]
+
+    def test_single_module_project_does_not_strip_dependency_sources(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        packages = tmp_path / "packages"
+        dependency = packages / "dependency"
+        dependency.mkdir(parents=True)
+        project_module = packages / "demo.py"
+        dependency_source = dependency / "__init__.py"
+        project_module.write_text("def main(): pass\n")
+        dependency_source.write_text("VALUE = 1\n")
+
+        monkeypatch.setattr(
+            "uvpacker.services.bytecode._run_uv_python", lambda **_: None
+        )
+
+        strip_source_to_pyc(packages, ("demo",), "3.12")
+
+        assert not project_module.exists()
+        assert dependency_source.read_text() == "VALUE = 1\n"
 
 
 class TestPatchEmbeddedRuntimeConfig:
