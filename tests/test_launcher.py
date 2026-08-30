@@ -102,13 +102,18 @@ class TestBuildLauncherForScript:
         data = result.read_bytes()
         trailer = data[-TRAILER_STRUCT.size :]
         json_len, magic = TRAILER_STRUCT.unpack(trailer)
-        meta_bytes = data[len(data) - TRAILER_STRUCT.size - json_len : len(data) - TRAILER_STRUCT.size]
+        meta_bytes = data[
+            len(data) - TRAILER_STRUCT.size - json_len : len(data) - TRAILER_STRUCT.size
+        ]
         metadata = json.loads(meta_bytes.decode("utf-8"))
         assert metadata["func"] == "main"
 
-    def test_returns_none_when_template_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_returns_none_when_template_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         def fake_get_template(gui: bool) -> None:
             return None
+
         monkeypatch.setattr(launcher, "get_template_exe", fake_get_template)
         result = launcher.build_launcher_for_script(
             launchers_dir=tmp_path,
@@ -218,7 +223,9 @@ class _MemTraversable:
         if not self.is_dir():
             return iter(())
         return iter(
-            _MemTraversable(self._archive, _pp.join(self._path, child) if self._path else child)
+            _MemTraversable(
+                self._archive, _pp.join(self._path, child) if self._path else child
+            )
             for child in self._archive.children(self._path)
         )
 

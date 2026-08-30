@@ -103,18 +103,21 @@ class TestHeadExists:
         def fake_urlopen(req: urllib.request.Request, **kwargs: object) -> io.BytesIO:
             assert req.method == "HEAD"
             return io.BytesIO(b"")
+
         monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
         assert runtime_downloader._head_exists("https://example.com/test.zip")
 
     def test_url_404_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def fake_urlopen(req: urllib.request.Request, **kwargs: object) -> None:
             raise urllib.error.HTTPError("url", 404, "Not Found", {}, io.BytesIO(b""))
+
         monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
         assert not runtime_downloader._head_exists("https://example.com/missing.zip")
 
     def test_url_error_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def fake_urlopen(req: urllib.request.Request, **kwargs: object) -> None:
             raise OSError("connection refused")
+
         monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
         assert not runtime_downloader._head_exists("https://invalid.example.com")
 
@@ -123,6 +126,7 @@ class TestFetchText:
     def test_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def fake_urlopen(url: str, **kwargs: object) -> io.BytesIO:
             return io.BytesIO(b"<html>index</html>")
+
         monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
         result = runtime_downloader._fetch_text("https://example.com", "test action")
         assert result == "<html>index</html>"
@@ -130,6 +134,7 @@ class TestFetchText:
     def test_network_error_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def fake_urlopen(url: str, **kwargs: object) -> None:
             raise OSError("timeout")
+
         monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
         with pytest.raises(RuntimeResolveError, match="Failed to test action"):
             runtime_downloader._fetch_text("https://example.com", "test action")
@@ -164,11 +169,15 @@ class TestResolveLatestEmbedForMinor:
         html = '<a href="3.12.0/">3.12.0/</a>'
         monkeypatch.setattr(runtime_downloader, "_fetch_text", lambda url, action: html)
         monkeypatch.setattr(runtime_downloader, "_head_exists", lambda url: False)
-        with pytest.raises(RuntimeResolveError, match="Could not find a Windows 64-bit"):
+        with pytest.raises(
+            RuntimeResolveError, match="Could not find a Windows 64-bit"
+        ):
             runtime_downloader.resolve_latest_embed_for_minor("3.12")
 
     def test_custom_download_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        custom = PackDownloadConfig(embed_index_base="https://mirror.example.com/python/")
+        custom = PackDownloadConfig(
+            embed_index_base="https://mirror.example.com/python/"
+        )
         html = '<a href="3.12.1/">3.12.1/</a>'
         called_url: list[str] = []
 
@@ -182,7 +191,9 @@ class TestResolveLatestEmbedForMinor:
 
         monkeypatch.setattr(runtime_downloader, "_fetch_text", fake_fetch)
         monkeypatch.setattr(runtime_downloader, "_head_exists", fake_head)
-        result = runtime_downloader.resolve_latest_embed_for_minor("3.12", download=custom)
+        result = runtime_downloader.resolve_latest_embed_for_minor(
+            "3.12", download=custom
+        )
         assert result == "3.12.1"
         assert called_url[0] == "https://mirror.example.com/python/"
         assert (
@@ -196,9 +207,7 @@ class TestDownloadAndExtractEmbeddedRuntime:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cache_dir = tmp_path / "uvpacker" / "embed"
-        monkeypatch.setattr(
-            runtime_cache, "get_embed_cache_dir", lambda: cache_dir
-        )
+        monkeypatch.setattr(runtime_cache, "get_embed_cache_dir", lambda: cache_dir)
         cache_dir.mkdir(parents=True)
         cache_zip = cache_dir / "python-3.12.1-embed-amd64.zip"
         with zipfile.ZipFile(cache_zip, "w") as zf:
@@ -214,9 +223,7 @@ class TestDownloadAndExtractEmbeddedRuntime:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cache_dir = tmp_path / "uvpacker" / "embed"
-        monkeypatch.setattr(
-            runtime_cache, "get_embed_cache_dir", lambda: cache_dir
-        )
+        monkeypatch.setattr(runtime_cache, "get_embed_cache_dir", lambda: cache_dir)
 
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "w") as zf:
@@ -238,9 +245,7 @@ class TestDownloadAndExtractEmbeddedRuntime:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cache_dir = tmp_path / "uvpacker" / "embed"
-        monkeypatch.setattr(
-            runtime_cache, "get_embed_cache_dir", lambda: cache_dir
-        )
+        monkeypatch.setattr(runtime_cache, "get_embed_cache_dir", lambda: cache_dir)
         cache_dir.mkdir(parents=True)
         cache_zip = cache_dir / "python-3.12.1-embed-amd64.zip"
         cache_zip.write_text("corrupt", encoding="utf-8")
@@ -264,9 +269,7 @@ class TestDownloadAndExtractEmbeddedRuntime:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cache_dir = tmp_path / "uvpacker" / "embed"
-        monkeypatch.setattr(
-            runtime_cache, "get_embed_cache_dir", lambda: cache_dir
-        )
+        monkeypatch.setattr(runtime_cache, "get_embed_cache_dir", lambda: cache_dir)
 
         def fake_urlopen(url: str, **kwargs: object) -> None:
             raise OSError("network error")
@@ -279,7 +282,9 @@ class TestDownloadAndExtractEmbeddedRuntime:
         with pytest.raises(RuntimeResolveError, match="Failed to download"):
             runtime_cache.download_and_extract_embedded_runtime("3.12.1", dest)
 
-    def test_busy_lock_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_busy_lock_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         cache_dir = tmp_path / "uvpacker" / "embed"
         monkeypatch.setattr(runtime_cache, "get_embed_cache_dir", lambda: cache_dir)
         cache_dir.mkdir(parents=True)
@@ -291,7 +296,9 @@ class TestDownloadAndExtractEmbeddedRuntime:
         with pytest.raises(RuntimeResolveError, match="cache is busy"):
             runtime_cache.download_and_extract_embedded_runtime("3.12.1", dest)
 
-    def test_stale_lock_is_recovered(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_stale_lock_is_recovered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         cache_dir = tmp_path / "uvpacker" / "embed"
         monkeypatch.setattr(runtime_cache, "get_embed_cache_dir", lambda: cache_dir)
         cache_dir.mkdir(parents=True)

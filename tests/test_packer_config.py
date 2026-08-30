@@ -68,8 +68,8 @@ class TestLoadProjectConfig:
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
             '[project]\nname = "demo"\nrequires-python = "==3.12.*"\n'
-            "[project.scripts]\ndemo = \"demo.main:main\"\n"
-            "[build-system]\nrequires = [\"uv_build\"]\n"
+            '[project.scripts]\ndemo = "demo.main:main"\n'
+            '[build-system]\nrequires = ["uv_build"]\n'
             'build-backend = "uv_build"\n'
         )
         cfg = load_project_config(pyproject)
@@ -86,9 +86,9 @@ class TestLoadProjectConfig:
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
             '[project]\nname = "app"\nrequires-python = "==3.12.*"\n'
-            "[project.scripts]\ncli = \"app.cli:main\"\n"
-            "[project.gui-scripts]\nviewer = \"app.viewer:main\"\n"
-            "[build-system]\nrequires = [\"uv_build\"]\n"
+            '[project.scripts]\ncli = "app.cli:main"\n'
+            '[project.gui-scripts]\nviewer = "app.viewer:main"\n'
+            '[build-system]\nrequires = ["uv_build"]\n'
             'build-backend = "uv_build"\n'
         )
         cfg = load_project_config(pyproject)
@@ -102,8 +102,8 @@ class TestLoadProjectConfig:
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
             '[project]\nrequires-python = "==3.12.*"\n'
-            "[project.scripts]\ndemo=\"demo.main:main\"\n"
-            "[build-system]\nrequires = [\"uv_build\"]\n"
+            '[project.scripts]\ndemo="demo.main:main"\n'
+            '[build-system]\nrequires = ["uv_build"]\n'
             'build-backend = "uv_build"\n'
         )
         with pytest.raises(ConfigError, match="project.name"):
@@ -113,8 +113,8 @@ class TestLoadProjectConfig:
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
             '[project]\nname = "demo"\n'
-            "[project.scripts]\ndemo=\"demo.main:main\"\n"
-            "[build-system]\nrequires = [\"uv_build\"]\n"
+            '[project.scripts]\ndemo="demo.main:main"\n'
+            '[build-system]\nrequires = ["uv_build"]\n'
             'build-backend = "uv_build"\n'
         )
         cfg = load_project_config(pyproject)
@@ -124,7 +124,7 @@ class TestLoadProjectConfig:
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
             '[project]\nname = "demo"\nrequires-python = "==3.12.*"\n'
-            "[build-system]\nrequires = [\"uv_build\"]\n"
+            '[build-system]\nrequires = ["uv_build"]\n'
             'build-backend = "uv_build"\n'
         )
         cfg = load_project_config(pyproject)
@@ -134,7 +134,7 @@ class TestLoadProjectConfig:
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
             '[project]\nname = "demo"\nrequires-python = "==3.12.*"\n'
-            "[project.scripts]\ndemo = \"demo.main:main\"\n"
+            '[project.scripts]\ndemo = "demo.main:main"\n'
         )
         cfg = load_project_config(pyproject)
         assert cfg.build_system == {}
@@ -143,8 +143,8 @@ class TestLoadProjectConfig:
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
             '[project]\nname = "demo"\nrequires-python = "==3.12.*"\n'
-            "[project.scripts]\nentry = \"demo.entry\"\n"
-            "[build-system]\nrequires = [\"uv_build\"]\n"
+            '[project.scripts]\nentry = "demo.entry"\n'
+            '[build-system]\nrequires = ["uv_build"]\n'
             'build-backend = "uv_build"\n'
         )
         cfg = load_project_config(pyproject)
@@ -328,7 +328,9 @@ class TestResolveOutputDir:
         with pytest.raises(ConfigError, match="must not contain the project directory"):
             resolve_output_dir(cfg, project_dir, tmp_path)
 
-    def test_rejects_home_output(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_rejects_home_output(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         home_dir = tmp_path / "home"
         home_dir.mkdir()
         cfg = ProjectConfig(
@@ -585,7 +587,9 @@ class TestLogDownloadSources:
     def test_non_default_config_logs(self, capsys: pytest.CaptureFixture[str]) -> None:
         from uvpacker.domain.sources import PackDownloadConfig
 
-        custom = PackDownloadConfig(embed_index_base="https://mirror.example.com/python/")
+        custom = PackDownloadConfig(
+            embed_index_base="https://mirror.example.com/python/"
+        )
         packer._log_download_sources(custom)
         captured = capsys.readouterr().out
         assert "Non-default embed index" in captured

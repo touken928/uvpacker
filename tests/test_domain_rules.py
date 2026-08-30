@@ -121,7 +121,9 @@ class TestValidateOutputDir:
         with pytest.raises(ConfigError, match="filesystem root"):
             validate_output_dir(project_dir, pathlib.Path("/"))
 
-    def test_rejects_home(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_rejects_home(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         home_dir = tmp_path / "home"
         home_dir.mkdir()
         monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: home_dir))

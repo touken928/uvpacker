@@ -58,7 +58,9 @@ class TestTail:
 
 
 class TestValidateBuiltWheel:
-    def test_pure_python_wheel_non_windows(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_pure_python_wheel_non_windows(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setattr(sys, "platform", "linux")
         wheel = Path("/tmp/demo-0.1.0-py3-none-any.whl")
         uv_client._validate_built_wheel(wheel)  # should not raise
@@ -68,13 +70,17 @@ class TestValidateBuiltWheel:
         wheel = Path("/tmp/demo-0.1.0-py3-none-any.whl")
         uv_client._validate_built_wheel(wheel)  # should not raise
 
-    def test_non_any_wheel_on_linux_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_non_any_wheel_on_linux_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setattr(sys, "platform", "linux")
         wheel = Path("/tmp/demo-0.1.0-cp312-abi3-linux_x86_64.whl")
         with pytest.raises(BuildError, match="Cross-platform packaging"):
             uv_client._validate_built_wheel(wheel)
 
-    def test_non_any_wheel_on_macos_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_non_any_wheel_on_macos_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setattr(sys, "platform", "darwin")
         wheel = Path("/tmp/demo-0.1.0-cp312-abi3-macosx_11_0_arm64.whl")
         with pytest.raises(BuildError, match="Cross-platform packaging"):

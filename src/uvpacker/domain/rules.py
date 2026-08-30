@@ -66,7 +66,9 @@ def validate_output_dir(project_dir: Path, output_dir: Path) -> None:
             f"Output directory must not be the project directory: {output_dir}"
         )
     if output_dir == Path(output_dir.anchor):
-        raise ConfigError(f"Refusing to use filesystem root as output directory: {output_dir}")
+        raise ConfigError(
+            f"Refusing to use filesystem root as output directory: {output_dir}"
+        )
     if output_dir in project_dir.parents:
         raise ConfigError(
             f"Output directory must not contain the project directory: {output_dir}"

@@ -111,6 +111,3 @@ def _read_metadata_name(metadata_path: pathlib.Path) -> str | None:
 
 def _normalize_distribution_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
-
-
-

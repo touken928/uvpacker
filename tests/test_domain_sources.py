@@ -19,15 +19,21 @@ class TestPackDownloadConfig:
         )
 
     def test_custom_embed_listing_url(self) -> None:
-        config = PackDownloadConfig(embed_index_base="https://mirror.example.com/python/")
+        config = PackDownloadConfig(
+            embed_index_base="https://mirror.example.com/python/"
+        )
         assert config.embed_listing_url() == "https://mirror.example.com/python/"
 
     def test_custom_embed_listing_url_no_trailing_slash(self) -> None:
-        config = PackDownloadConfig(embed_index_base="https://mirror.example.com/python")
+        config = PackDownloadConfig(
+            embed_index_base="https://mirror.example.com/python"
+        )
         assert config.embed_listing_url() == "https://mirror.example.com/python/"
 
     def test_custom_embed_zip_url(self) -> None:
-        config = PackDownloadConfig(embed_index_base="https://mirror.example.com/python/")
+        config = PackDownloadConfig(
+            embed_index_base="https://mirror.example.com/python/"
+        )
         assert (
             config.embed_zip_url("3.11.9")
             == "https://mirror.example.com/python/3.11.9/python-3.11.9-embed-amd64.zip"

@@ -214,7 +214,9 @@ def download_and_extract_embedded_runtime(
 
         try:
             try:
-                with urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as resp, tmp_path.open("wb") as f:
+                with urllib.request.urlopen(
+                    url, timeout=_DOWNLOAD_TIMEOUT
+                ) as resp, tmp_path.open("wb") as f:
                     shutil.copyfileobj(resp, f)
             except Exception as exc:  # noqa: BLE001
                 raise RuntimeResolveError(
